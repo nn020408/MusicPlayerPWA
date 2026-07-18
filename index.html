@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MusicPlayer</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#121212" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon.svg" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <section id="login-screen" class="screen">
+    <div class="login-box">
+      <h1>MusicPlayer</h1>
+      <p>Stream your music straight from OneDrive.</p>
+      <button id="sign-in-btn" class="primary-btn">Sign in with Microsoft</button>
+    </div>
+  </section>
+
+  <section id="app-screen" class="screen hidden">
+    <header class="top-bar">
+      <h1>MusicPlayer</h1>
+      <div class="top-bar-actions">
+        <button id="shuffle-view-btn" class="icon-btn small" title="Shuffle play everything shown here">🔀</button>
+        <button id="search-btn" class="icon-btn small" title="Search">🔍</button>
+        <button id="playlists-btn" class="icon-btn small" title="Playlists">📃</button>
+        <button id="settings-btn" class="icon-btn small" title="Settings">⚙️</button>
+      </div>
+    </header>
+
+    <div id="breadcrumb" class="breadcrumb"></div>
+    <main id="file-list" class="file-list main-list">
+      <p class="status-msg">Select your music folder to get started.</p>
+    </main>
+
+    <p id="status-msg" class="status-msg"></p>
+
+    <!-- Search overlay -->
+    <div id="search-overlay" class="overlay hidden">
+      <div class="overlay-header search-header">
+        <input id="search-input" type="text" placeholder="Search songs, artists, albums…" />
+        <button id="search-close-btn" class="text-btn">Cancel</button>
+      </div>
+      <div id="search-results" class="file-list"></div>
+    </div>
+
+    <!-- Playlists overlay -->
+    <div id="playlists-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <h2>Playlists</h2>
+        <button id="playlists-close-btn" class="text-btn">Close</button>
+      </div>
+      <button id="new-playlist-btn" class="secondary-btn playlists-new-btn">+ New Playlist</button>
+      <div id="playlists-list" class="file-list"></div>
+    </div>
+
+    <!-- Settings overlay -->
+    <div id="settings-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <h2>Settings</h2>
+        <button id="settings-close-btn" class="text-btn">Close</button>
+      </div>
+      <div class="settings-body">
+        <p class="settings-row">Music folder: <strong id="library-root-label">OneDrive (everything)</strong></p>
+        <button id="change-folder-btn" class="secondary-btn">Change music folder</button>
+        <button id="rescan-library-btn" class="secondary-btn">Rescan library</button>
+        <p id="scan-status" class="status-msg"></p>
+        <hr />
+        <p class="settings-row">Backup your playlists and search index to a file — safe to do anytime, doesn't affect app speed.</p>
+        <button id="backup-btn" class="secondary-btn">Backup to file</button>
+        <button id="restore-btn" class="secondary-btn">Restore from file</button>
+        <input id="restore-file-input" type="file" accept="application/json" class="hidden" />
+        <hr />
+        <button id="sign-out-btn" class="secondary-btn danger">Sign out</button>
+      </div>
+    </div>
+
+    <!-- Detail view: playlist tracks -->
+    <div id="detail-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="detail-back-btn" class="text-btn">‹ Back</button>
+        <h2 id="detail-title">—</h2>
+      </div>
+      <div id="detail-list" class="file-list"></div>
+    </div>
+
+    <!-- Mini player -->
+    <footer id="now-playing-bar" class="now-playing hidden">
+      <div class="np-art">
+        <img id="mini-art" class="hidden" alt="" />
+        <span id="mini-art-fallback">🎵</span>
+      </div>
+      <div class="now-playing-info">
+        <div id="now-playing-title" class="np-title">—</div>
+        <div id="now-playing-artist" class="np-artist">—</div>
+      </div>
+      <div class="np-controls">
+        <button id="mini-prev-btn" class="icon-btn">⏮</button>
+        <button id="mini-play-pause-btn" class="icon-btn">▶</button>
+        <button id="mini-next-btn" class="icon-btn">⏭</button>
+      </div>
+    </footer>
+
+    <div id="toast" class="toast hidden"></div>
+  </section>
+
+  <!-- Folder picker: first-run onboarding AND "change music folder" from Settings -->
+  <div id="folder-picker-overlay" class="overlay hidden">
+    <div class="overlay-header">
+      <h2 id="folder-picker-heading">Select your music folder</h2>
+      <button id="folder-picker-cancel-btn" class="text-btn hidden">Cancel</button>
+    </div>
+    <p class="settings-hint fp-hint">Browse to the folder that contains your music, then tap "Use this folder" — subfolders are included automatically.</p>
+    <div class="toolbar">
+      <button id="fp-home-btn" class="text-btn">🏠 OneDrive root</button>
+    </div>
+    <div id="fp-breadcrumb" class="breadcrumb"></div>
+    <div id="fp-file-list" class="file-list"></div>
+    <div class="folder-picker-footer">
+      <button id="fp-use-here-btn" class="primary-btn">✓ Use this folder</button>
+    </div>
+  </div>
+
+  <!-- Full-screen Now Playing -->
+  <section id="full-player" class="full-player hidden">
+    <div class="full-player-header">
+      <button id="full-player-close-btn" class="icon-btn">⌄</button>
+      <span class="full-player-subtitle">Now Playing</span>
+      <button id="add-to-playlist-btn" class="icon-btn">⋮</button>
+    </div>
+    <div class="full-player-art">
+      <img id="full-art" class="hidden" alt="" />
+      <span id="full-art-fallback">🎵</span>
+    </div>
+    <div class="full-player-meta">
+      <h2 id="full-title">—</h2>
+      <p id="full-artist">—</p>
+    </div>
+    <div class="full-player-seek">
+      <input id="full-seek-bar" type="range" min="0" max="1000" value="0" />
+      <div class="seek-times"><span id="full-current-time">0:00</span><span id="full-duration">0:00</span></div>
+    </div>
+    <div class="full-player-controls">
+      <button id="shuffle-btn" class="icon-btn ctrl" title="Shuffle">🔀</button>
+      <button id="full-prev-btn" class="icon-btn ctrl" title="Previous">⏮</button>
+      <button id="full-play-pause-btn" class="icon-btn ctrl big" title="Play/Pause">▶</button>
+      <button id="full-next-btn" class="icon-btn ctrl" title="Next">⏭</button>
+      <button id="repeat-btn" class="icon-btn ctrl" title="Repeat">🔁</button>
+    </div>
+  </section>
+
+  <!-- Add-to-playlist modal -->
+  <div id="add-playlist-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Add to playlist</h3>
+      <div id="add-playlist-list" class="file-list"></div>
+      <button id="add-playlist-new-btn" class="secondary-btn">+ New Playlist</button>
+      <button id="add-playlist-cancel-btn" class="text-btn">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Folder actions modal (3-dot menu on a folder row) -->
+  <div id="folder-actions-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="folder-actions-title">Folder</h3>
+      <button id="folder-play-btn" class="secondary-btn">▶ Play this folder (incl. subfolders)</button>
+      <button id="folder-add-playlist-btn" class="secondary-btn">➕ Add all songs to playlist</button>
+      <button id="folder-actions-cancel-btn" class="text-btn">Cancel</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/graph.js"></script>
+  <script src="js/library.js"></script>
+  <script src="js/playlists.js"></script>
+  <script src="js/id3.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
