@@ -1169,6 +1169,11 @@ player.onTrackChange = (item) => {
   el.fullTitle.textContent = title;
   el.fullArtist.textContent = artist;
   updateNowPlayingRows();
+  // Cleared here, set in onRealTags below once the real embedded tag read
+  // resolves for THIS track — lyrics matching prefers this over
+  // item.audio.artist (see fetchLyricsResult), since that's the exact
+  // title/artist actually shown on screen, not OneDrive's lighter metadata.
+  currentRealTags = null;
 
   el.miniArt.classList.add("hidden");
   el.miniArtFallback.classList.remove("hidden");
@@ -1258,6 +1263,18 @@ player.onRealTags = (tags) => {
     el.fullArt.classList.remove("hidden");
     el.fullArtFallback.classList.add("hidden");
   }
+
+  // player.js only guarantees this fires for whatever's still current, so
+  // it's safe to trust queue[queueIndex] here (see the guard in playCurrent).
+  currentRealTags = tags;
+  // Covers tapping Lyrics fast enough that this hadn't resolved yet — that
+  // first lookup used the less reliable item.audio.artist and got cached
+  // under this track's id, so redo it now that the same title/artist shown
+  // on screen is available to match with.
+  if (lyricsViewActive && queue[queueIndex]) {
+    lyricsCache.delete(queue[queueIndex].id);
+    showLyricsForCurrentTrack();
+  }
 };
 
 el.miniPrevBtn.addEventListener("click", (e) => {
@@ -1340,6 +1357,11 @@ el.upNextCloseBtn.addEventListener("click", () => el.upNextOverlay.classList.add
 const lyricsCache = new Map();
 let lyricsViewActive = false;
 let currentLyrics = null; // { plain, synced: [{time,text}]|null, instrumental } for whatever's rendered now
+// The real embedded tag read (id3.js), captured in player.onRealTags below —
+// this is the exact title/artist actually shown on screen, and a more
+// reliable match target than item.audio (OneDrive's lighter folder-listing
+// metadata, which fetchLyricsResult falls back to when this isn't set yet).
+let currentRealTags = null;
 let activeLyricsLineIndex = -1;
 
 function parseSyncedLyrics(lrc) {
@@ -1456,13 +1478,21 @@ function bestScoredMatch(results, wantTitle, wantArtist, wantDuration) {
 }
 
 async function fetchLyricsResult(track) {
-  const rawTitle = track.name.replace(/\.[^/.]+$/, "");
+  // Prefer the real embedded tag (currentRealTags — the exact title/artist
+  // shown on screen) over item.audio, OneDrive's lighter folder-listing
+  // metadata that can be empty or wrong even when the real tag is fine.
+  // Only trusted if it actually belongs to this track (guarded already in
+  // player.onRealTags, but track could still be a different queue entry
+  // being looked up e.g. from Up Next).
+  const realTags = queue[queueIndex] === track ? currentRealTags : null;
+
+  const rawTitle = (realTags && realTags.title) || track.name.replace(/\.[^/.]+$/, "");
   const cleanTitle = cleanTrackTitle(rawTitle);
   const titleCandidates = [...new Set([cleanTitle, rawTitle])];
 
-  const rawArtist = (track.audio && track.audio.artist) || "";
+  const rawArtist = (realTags && realTags.artist) || (track.audio && track.audio.artist) || "";
   const artist = rawArtist ? primaryArtist(rawArtist) : "";
-  const album = (track.audio && track.audio.album) || "";
+  const album = (realTags && realTags.album) || (track.audio && track.audio.album) || "";
   const duration = Math.round(audioEl.duration) || 0;
 
   let hit = null;
