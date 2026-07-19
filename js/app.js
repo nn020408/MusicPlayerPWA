@@ -1356,36 +1356,140 @@ function parseSyncedLyrics(lrc) {
   return lines.sort((a, b) => a.time - b.time);
 }
 
+// Filenames rarely match LRCLIB's clean track titles verbatim — strips a
+// leading track number ("03 - ", "03. ") and trailing tags that are clearly
+// upload/quality noise, not part of the actual title ("(Official Video)",
+// "[HD]", "(Lyrics)"). Loops so "Song (Official Video) [HD]" loses both.
+// Deliberately conservative: things like "(Remix)" or "(feat. X)" are left
+// alone since they're often genuinely part of the official title.
+function cleanTrackTitle(name) {
+  let t = name.replace(/^\s*(?:track\s*)?\d{1,3}[\s._-]+/i, "");
+  const trailingTag = /\s*[([]([^()[\]]{1,60})[)\]]\s*$/;
+  const noiseWords = /official|video|audio|lyrics?|visualizer|hd|4k|mv\b|kbps|flac|full album/i;
+  let m;
+  while ((m = t.match(trailingTag)) && noiseWords.test(m[1])) {
+    t = t.slice(0, m.index);
+  }
+  return t.replace(/\s{2,}/g, " ").trim();
+}
+
+// "Artist A feat. Artist B" / "Artist A, Artist B" / "Artist A & Artist B"
+// -> "Artist A" — LRCLIB's artist_name is the primary credited artist, and
+// querying with the full collab string as a single name rarely matches.
+function primaryArtist(artist) {
+  return artist.split(/\s*(?:,|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bx\b|\bvs\.?\b)\s*/i)[0].trim();
+}
+
+function normalizeForCompare(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// Used only against /api/search results, which can return several loosely-
+// matched candidates (covers, live versions, other songs with a similar
+// title) — blindly trusting index 0 was a real source of wrong lyrics.
+// Scores each candidate against what we actually asked for and only accepts
+// the best one if it clears a minimum bar, rather than always showing
+// *something*.
+function scoreLyricsCandidate(candidate, wantTitle, wantArtist, wantDuration) {
+  let score = 0;
+  const nWant = normalizeForCompare(wantTitle);
+  const nGot = normalizeForCompare(candidate.trackName);
+  if (nGot === nWant) score += 3;
+  else if (nWant && (nGot.includes(nWant) || nWant.includes(nGot))) score += 1.5;
+
+  if (wantArtist) {
+    const nWantArtist = normalizeForCompare(wantArtist);
+    const nGotArtist = normalizeForCompare(candidate.artistName);
+    if (nGotArtist === nWantArtist) score += 3;
+    else if (nGotArtist.includes(nWantArtist) || nWantArtist.includes(nGotArtist)) score += 1.5;
+  }
+
+  if (wantDuration && candidate.duration) {
+    const diff = Math.abs(candidate.duration - wantDuration);
+    if (diff <= 2) score += 2;
+    else if (diff <= 6) score += 1;
+    else if (diff > 20) score -= 2; // almost certainly a different recording
+  }
+  return score;
+}
+
+const LYRICS_MATCH_THRESHOLD = 2; // roughly: right title OR (right artist + close duration)
+
+async function lrclibGet(params) {
+  try {
+    const res = await fetch(`https://lrclib.net/api/get?${params}`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function lrclibSearch(params) {
+  try {
+    const res = await fetch(`https://lrclib.net/api/search?${params}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function bestScoredMatch(results, wantTitle, wantArtist, wantDuration) {
+  let best = null;
+  let bestScore = -Infinity;
+  for (const candidate of results) {
+    const score = scoreLyricsCandidate(candidate, wantTitle, wantArtist, wantDuration);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return bestScore >= LYRICS_MATCH_THRESHOLD ? best : null;
+}
+
 async function fetchLyricsResult(track) {
-  const title = track.name.replace(/\.[^/.]+$/, "");
-  const artist = (track.audio && track.audio.artist) || "";
+  const rawTitle = track.name.replace(/\.[^/.]+$/, "");
+  const cleanTitle = cleanTrackTitle(rawTitle);
+  const titleCandidates = [...new Set([cleanTitle, rawTitle])];
+
+  const rawArtist = (track.audio && track.audio.artist) || "";
+  const artist = rawArtist ? primaryArtist(rawArtist) : "";
   const album = (track.audio && track.audio.album) || "";
   const duration = Math.round(audioEl.duration) || 0;
 
-  async function tryEndpoint(path, params) {
-    try {
-      const res = await fetch(`https://lrclib.net/api/${path}?${params}`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return Array.isArray(data) ? data[0] : data;
-    } catch {
-      return null;
-    }
-  }
-
-  // Exact match first (needs artist + duration to be reliable) — falls back
-  // to fuzzy search when that's missing or comes up empty, since a lot of
-  // OneDrive files won't have full ID3 metadata to match on.
   let hit = null;
-  if (artist) {
-    const params = new URLSearchParams({ track_name: title, artist_name: artist });
+
+  // 1) Exact match on the cleaned title — most precise when it works.
+  if (!hit && artist) {
+    const params = new URLSearchParams({ track_name: cleanTitle, artist_name: artist });
     if (album) params.set("album_name", album);
     if (duration) params.set("duration", String(duration));
-    hit = await tryEndpoint("get", params);
+    hit = await lrclibGet(params);
   }
-  if (!hit) {
+  // 2) Same, but without duration — covers a different reference recording
+  //    (radio edit vs. album version) being a few seconds off.
+  if (!hit && artist && duration) {
+    const params = new URLSearchParams({ track_name: cleanTitle, artist_name: artist });
+    if (album) params.set("album_name", album);
+    hit = await lrclibGet(params);
+  }
+  // 3) Fuzzy search, scored — try each title candidate until one clears the
+  //    confidence bar, instead of trusting whichever result LRCLIB ranks
+  //    first.
+  for (const title of titleCandidates) {
+    if (hit) break;
     const params = new URLSearchParams({ track_name: title, artist_name: artist });
-    hit = await tryEndpoint("search", params);
+    const results = await lrclibSearch(params);
+    hit = bestScoredMatch(results, cleanTitle, artist, duration);
+  }
+  // 4) Last resort: title only, no artist constraint (covers a missing/wrong
+  //    artist tag) — still scored, so a low-confidence guess doesn't slip
+  //    through as if it were a real match.
+  if (!hit && artist) {
+    const params = new URLSearchParams({ track_name: cleanTitle });
+    const results = await lrclibSearch(params);
+    hit = bestScoredMatch(results, cleanTitle, "", duration);
   }
 
   if (!hit) return { plain: null, synced: null, instrumental: false };
