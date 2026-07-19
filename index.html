@@ -21,14 +21,20 @@
   </section>
 
   <section id="app-screen" class="screen hidden">
-    <header class="top-bar">
+    <header id="top-bar" class="top-bar">
       <h1>MusicPlayer</h1>
       <div class="top-bar-actions">
         <button id="shuffle-view-btn" class="icon-btn small" title="Shuffle play everything shown here">🔀</button>
         <button id="search-btn" class="icon-btn small" title="Search">🔍</button>
         <button id="playlists-btn" class="icon-btn small" title="Playlists">📃</button>
+        <button id="select-toggle-btn" class="icon-btn small" title="Select multiple">☑️</button>
         <button id="settings-btn" class="icon-btn small" title="Settings">⚙️</button>
       </div>
+    </header>
+    <header id="select-header-bar" class="top-bar hidden">
+      <button id="select-cancel-btn" class="text-btn">Cancel</button>
+      <div id="select-header-label" class="select-header-label">Select items</div>
+      <button id="select-all-btn" class="text-btn accent">Select all</button>
     </header>
 
     <div id="breadcrumb" class="breadcrumb"></div>
@@ -85,6 +91,17 @@
         <h2 id="detail-title">—</h2>
       </div>
       <div id="detail-list" class="file-list"></div>
+    </div>
+
+    <!-- Multi-select action bar — occupies the exact same fixed slot as the
+         mini player below (never shown at the same time as it, see
+         .select-mode-hidden in app.js). -->
+    <div id="select-action-bar" class="select-bar hidden">
+      <div id="select-count-label" class="select-count">0 selected</div>
+      <div class="select-bar-actions">
+        <button id="select-add-playlist-btn" class="secondary-btn">➕ Playlist</button>
+        <button id="select-shuffle-btn" class="primary-btn">🔀 Shuffle Play</button>
+      </div>
     </div>
 
     <!-- Mini player -->

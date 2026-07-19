@@ -149,6 +149,8 @@ button { font-family: inherit; }
   padding: 12px 16px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
+  position: relative; /* anchors the long-press sweep (::before) below */
+  overflow: hidden;
 }
 .row:active { background: var(--surface); }
 .row-icon { font-size: 20px; flex-shrink: 0; }
@@ -193,6 +195,81 @@ button { font-family: inherit; }
   flex-shrink: 0;
 }
 .folder-row .row-name { flex: 1; }
+
+/* ---------- Multi-select (long-press a folder/track row, or tap ☑️) ---------- */
+.select-header-label { flex: 1; text-align: center; font-size: 15px; font-weight: 600; }
+.text-btn.accent { color: var(--accent); }
+
+/* Fixed-size slot so the icon <-> checkbox swap never reflows row text. */
+.row-lead { position: relative; width: 20px; height: 20px; flex-shrink: 0; }
+.row-lead .row-icon,
+.row-lead .select-check {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.row-lead .row-icon { font-size: 20px; }
+.row-lead .select-check { opacity: 0; transform: scale(0.55); pointer-events: none; }
+.file-list.select-mode .row-lead .row-icon { opacity: 0; transform: scale(0.55); }
+.file-list.select-mode .row-lead .select-check { opacity: 1; transform: scale(1); pointer-events: auto; }
+
+.select-check .circle {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.row.selected .select-check .circle { background: var(--accent); border-color: var(--accent); color: #0b0b0b; }
+.row.selected { background: rgba(29, 185, 84, 0.1); }
+
+.file-list.select-mode .row-menu-btn { opacity: 0; pointer-events: none; width: 0; padding: 0; }
+
+/* Long-press feedback: a fill that sweeps over the same window as the hold
+   threshold (see LONG_PRESS_MS in app.js), so the gesture is visible while
+   it's happening — release early and it snaps back instead of firing. */
+.row::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: rgba(29, 185, 84, 0.16);
+  transform: scaleX(0);
+  transform-origin: left;
+  pointer-events: none;
+}
+.row.pressing::before { transform: scaleX(1); transition: transform 480ms linear; }
+.row.press-cancel::before { transform: scaleX(0); transition: transform 160ms ease-out; }
+
+@keyframes select-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.02); background: rgba(29, 185, 84, 0.22); }
+  100% { transform: scale(1); }
+}
+.row.just-selected { animation: select-pop 260ms ease-out; }
+
+/* Same fixed slot the mini player occupies — the two are never shown at
+   once (app.js toggles this class on #now-playing-bar while selecting). */
+#now-playing-bar.select-mode-hidden { display: none; }
+
+.select-bar {
+  position: fixed;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  left: 8px;
+  right: 8px;
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 25; /* matches .now-playing — same slot, same layer */
+}
+.select-bar .select-count { font-size: 13px; font-weight: 600; flex: 1; }
+.select-bar-actions { display: flex; gap: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .row::before, .row.just-selected { animation: none !important; transition: none !important; }
+}
 
 .status-msg {
   text-align: center;
