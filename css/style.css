@@ -1,12 +1,68 @@
+/* ---------- Color themes ----------
+   Every color in this file is one of these custom properties (see the CSS
+   audit in the "5 themes" change) — switching themes is just swapping which
+   block below is active via data-theme on <html> (set in app.js/index.html),
+   nothing here runs per-frame or costs anything beyond a single repaint.
+   --accent-ink is whatever text color reads best ON TOP of --accent (button
+   labels, the multi-select checkmark) — light accents need dark ink, dark
+   accents need light ink, so it's themed alongside --accent itself. Every
+   theme below was checked to clear WCAG AA (4.5:1) for text/background and
+   accent/background pairs. */
 :root {
+  /* Midnight — default */
   --bg: #121212;
   --surface: #1c1c1e;
   --surface-2: #262628;
   --accent: #1db954;
+  --accent-ink: #0b0b0b;
   --text: #f5f5f5;
   --text-dim: #a0a0a0;
   --border: #2a2a2c;
   --danger: #e05252;
+}
+:root[data-theme="ocean"] {
+  --bg: #0f1720;
+  --surface: #16212c;
+  --surface-2: #1e2c3a;
+  --accent: #3ea6ff;
+  --accent-ink: #062038;
+  --text: #eef3f8;
+  --text-dim: #93a7ba;
+  --border: #233240;
+  --danger: #ff6b6b;
+}
+:root[data-theme="ember"] {
+  --bg: #1c1210;
+  --surface: #261a17;
+  --surface-2: #31221e;
+  --accent: #ff8a5c;
+  --accent-ink: #2a1206;
+  --text: #fbeee7;
+  --text-dim: #c0a293;
+  --border: #3c2b26;
+  --danger: #ff6161;
+}
+:root[data-theme="violet"] {
+  --bg: #160f1e;
+  --surface: #201829;
+  --surface-2: #2a2135;
+  --accent: #b280ff;
+  --accent-ink: #180a2c;
+  --text: #f3eefb;
+  --text-dim: #ac9dc0;
+  --border: #352a41;
+  --danger: #ff7189;
+}
+:root[data-theme="daylight"] {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --surface-2: #eceef1;
+  --accent: #0f6b35;
+  --accent-ink: #ffffff;
+  --text: #16181b;
+  --text-dim: #5b6470;
+  --border: #dde1e6;
+  --danger: #c53030;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -41,7 +97,7 @@ button { font-family: inherit; }
 
 .primary-btn {
   background: var(--accent);
-  color: #0b0b0b;
+  color: var(--accent-ink);
   border: none;
   padding: 14px 28px;
   border-radius: 999px;
@@ -220,8 +276,8 @@ button { font-family: inherit; }
   font-size: 11px; font-weight: 700; color: transparent;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
-.row.selected .select-check .circle { background: var(--accent); border-color: var(--accent); color: #0b0b0b; }
-.row.selected { background: rgba(29, 185, 84, 0.1); }
+.row.selected .select-check .circle { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.row.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
 .file-list.select-mode .row-menu-btn { opacity: 0; pointer-events: none; width: 0; padding: 0; }
 
@@ -231,7 +287,7 @@ button { font-family: inherit; }
 .row::before {
   content: "";
   position: absolute; inset: 0;
-  background: rgba(29, 185, 84, 0.16);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   transform: scaleX(0);
   transform-origin: left;
   pointer-events: none;
@@ -241,7 +297,7 @@ button { font-family: inherit; }
 
 @keyframes select-pop {
   0% { transform: scale(1); }
-  45% { transform: scale(1.02); background: rgba(29, 185, 84, 0.22); }
+  45% { transform: scale(1.02); background: color-mix(in srgb, var(--accent) 22%, transparent); }
   100% { transform: scale(1); }
 }
 .row.just-selected { animation: select-pop 260ms ease-out; }
@@ -329,12 +385,25 @@ button { font-family: inherit; }
   padding-bottom: 90px; /* clears the floating mini-player when it's showing */
 }
 
-.settings-body { padding: 16px; }
+.settings-body { padding: 16px; flex: 1; overflow-y: auto; }
 .settings-row { margin: 4px 0; }
 .settings-hint { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
 .settings-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
 .playlists-new-btn { margin: 12px 16px; }
+
+/* Theme picker (Settings) */
+.theme-list { padding: 4px 0 0; }
+.theme-row { padding: 10px 4px; cursor: pointer; }
+.theme-row-active .row-name { color: var(--accent); font-weight: 600; }
+.theme-swatch {
+  width: 32px; height: 32px; border-radius: 50%;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+}
+.theme-swatch-accent { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25); }
+.theme-check { color: var(--accent); font-size: 16px; font-weight: 700; flex-shrink: 0; }
 
 /* Folder picker */
 .fp-hint { padding: 10px 16px 0; }
@@ -439,7 +508,7 @@ button { font-family: inherit; }
 .full-player {
   position: fixed;
   inset: 0;
-  background: linear-gradient(180deg, #1a1a1c 0%, var(--bg) 60%);
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 60%);
   z-index: 30;
   display: flex;
   flex-direction: column;
@@ -520,7 +589,7 @@ button { font-family: inherit; }
 /* Note: CSS `color` has no effect on emoji glyphs (they render as fixed-color
    pictures), so the active state needs a background/border to be visible. */
 .icon-btn.ctrl.active {
-  background: rgba(29, 185, 84, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--accent) inset;
 }

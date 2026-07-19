@@ -9,6 +9,17 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <link rel="stylesheet" href="css/style.css" />
+  <script>
+    // Applies the saved color theme before first paint — doing this in
+    // app.js instead (loaded at the end of body) would show a flash of
+    // Midnight (the default) before switching to whatever's saved.
+    (function () {
+      try {
+        var saved = localStorage.getItem("colorTheme");
+        if (saved) document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
 
@@ -74,6 +85,9 @@
         <button id="change-folder-btn" class="secondary-btn">Change music folder</button>
         <button id="rescan-library-btn" class="secondary-btn">Rescan library</button>
         <p id="scan-status" class="status-msg"></p>
+        <hr />
+        <p class="settings-row">Theme</p>
+        <div id="theme-list" class="file-list theme-list"></div>
         <hr />
         <p class="settings-row">Backup your playlists and search index to a file — safe to do anytime, doesn't affect app speed.</p>
         <button id="backup-btn" class="secondary-btn">Backup to file</button>
