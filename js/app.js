@@ -1413,7 +1413,14 @@ function scoreLyricsCandidate(candidate, wantTitle, wantArtist, wantDuration) {
   return score;
 }
 
-const LYRICS_MATCH_THRESHOLD = 2; // roughly: right title OR (right artist + close duration)
+// A lone exact title match (worth 3) used to clear this on its own — the
+// bug that showed unrelated Spanish rap lyrics for a vallenato track called
+// "Casualidad" ("coincidence"): common enough as a title that it collides
+// across genres, and with no artist tag on the file to corroborate against,
+// title-only was the *only* signal available. Raised so an exact title match
+// needs at least a partial second signal (artist or duration) to pass —
+// title alone, or artist alone, is no longer enough by itself.
+const LYRICS_MATCH_THRESHOLD = 4;
 
 async function lrclibGet(params) {
   try {
