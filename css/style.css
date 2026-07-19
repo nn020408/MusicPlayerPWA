@@ -562,6 +562,39 @@ button { font-family: inherit; }
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 #full-art-fallback svg { width: 34%; height: 34%; opacity: 0.9; }
+
+/* Lyrics — occupies the same flex slot as .full-player-art (see the toggle
+   in app.js), so it needs the same flex:1/min-height:0 to size correctly. */
+.lyrics-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 4px;
+}
+.lyrics-line {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-dim);
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+.lyrics-line.active { color: var(--text); transform: scale(1.03); }
+.lyrics-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 16px;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--text);
+}
+.lyrics-empty { margin-top: auto; margin-bottom: auto; }
+.icon-btn.icon-active { color: var(--accent); }
+
 .full-player-meta { text-align: center; margin-top: 24px; }
 .full-player-meta h2 { font-size: 22px; margin: 0 0 4px; }
 .full-player-meta p { margin: 0; color: var(--text-dim); }

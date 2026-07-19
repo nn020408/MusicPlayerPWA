@@ -74,6 +74,9 @@ const el = {
   fullPlayerCloseBtn: document.getElementById("full-player-close-btn"),
   upNextBtn: document.getElementById("up-next-btn"),
   addToPlaylistBtn: document.getElementById("add-to-playlist-btn"),
+  lyricsBtn: document.getElementById("lyrics-btn"),
+  lyricsPanel: document.getElementById("lyrics-panel"),
+  fullPlayerArt: document.querySelector(".full-player-art"),
   fullArt: document.getElementById("full-art"),
   fullArtFallback: document.getElementById("full-art-fallback"),
   fullTitle: document.getElementById("full-title"),
@@ -1188,6 +1191,11 @@ player.onTrackChange = (item) => {
       navigator.mediaSession.metadata.artwork = [{ src: url, sizes: "512x512", type: "image/jpeg" }];
     }
   });
+
+  // Lyrics view (if open) follows track changes rather than snapping back to
+  // album art — same behavior as Spotify/Apple Music when you skip tracks
+  // while reading along.
+  if (lyricsViewActive) showLyricsForCurrentTrack();
 };
 
 // OneDrive's thumbnail metadata isn't always reliable (same gap we found
@@ -1214,6 +1222,7 @@ player.onTimeUpdate = (current, duration) => {
   el.fullCurrentTime.textContent = formatTime(current);
   el.fullDuration.textContent = formatTime(duration);
   if (duration > 0) el.fullSeekBar.value = String((current / duration) * 1000);
+  if (lyricsViewActive) updateActiveLyricsLine(current);
 };
 
 player.onStatus = (msg) => {
@@ -1279,6 +1288,14 @@ function openFullPlayer() {
 }
 function closeFullPlayer() {
   el.fullPlayer.classList.add("hidden");
+  // Reopening always starts back on album art, not wherever lyrics view was
+  // left — avoids surprising state the next time this is opened.
+  if (lyricsViewActive) {
+    lyricsViewActive = false;
+    el.fullPlayerArt.classList.remove("hidden");
+    el.lyricsPanel.classList.add("hidden");
+    el.lyricsBtn.classList.remove("icon-active");
+  }
 }
 el.fullPlayerCloseBtn.addEventListener("click", closeFullPlayer);
 el.addToPlaylistBtn.addEventListener("click", () => {
@@ -1314,6 +1331,154 @@ function openUpNextView() {
 el.upNextBtn.addEventListener("click", openUpNextView);
 el.upNextCloseBtn.addEventListener("click", () => el.upNextOverlay.classList.add("hidden"));
 
+// ---------- Lyrics ----------
+// LRCLIB (lrclib.net) is a free, keyless, crowd-sourced lyrics API — same
+// "one small request for the currently-playing track only" pattern as
+// findOnlineArtwork's iTunes lookup above. Cached per track id (storing the
+// in-flight promise, same pattern as thumbnailCache in graph.js) so
+// re-opening the panel for a track already seen this session doesn't refetch.
+const lyricsCache = new Map();
+let lyricsViewActive = false;
+let currentLyrics = null; // { plain, synced: [{time,text}]|null, instrumental } for whatever's rendered now
+let activeLyricsLineIndex = -1;
+
+function parseSyncedLyrics(lrc) {
+  const lines = [];
+  const timeTag = /\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\]/g;
+  lrc.split("\n").forEach((line) => {
+    const matches = [...line.matchAll(timeTag)];
+    if (!matches.length) return;
+    const text = line.replace(timeTag, "").trim();
+    matches.forEach((m) => {
+      lines.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text });
+    });
+  });
+  return lines.sort((a, b) => a.time - b.time);
+}
+
+async function fetchLyricsResult(track) {
+  const title = track.name.replace(/\.[^/.]+$/, "");
+  const artist = (track.audio && track.audio.artist) || "";
+  const album = (track.audio && track.audio.album) || "";
+  const duration = Math.round(audioEl.duration) || 0;
+
+  async function tryEndpoint(path, params) {
+    try {
+      const res = await fetch(`https://lrclib.net/api/${path}?${params}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return Array.isArray(data) ? data[0] : data;
+    } catch {
+      return null;
+    }
+  }
+
+  // Exact match first (needs artist + duration to be reliable) — falls back
+  // to fuzzy search when that's missing or comes up empty, since a lot of
+  // OneDrive files won't have full ID3 metadata to match on.
+  let hit = null;
+  if (artist) {
+    const params = new URLSearchParams({ track_name: title, artist_name: artist });
+    if (album) params.set("album_name", album);
+    if (duration) params.set("duration", String(duration));
+    hit = await tryEndpoint("get", params);
+  }
+  if (!hit) {
+    const params = new URLSearchParams({ track_name: title, artist_name: artist });
+    hit = await tryEndpoint("search", params);
+  }
+
+  if (!hit) return { plain: null, synced: null, instrumental: false };
+  return {
+    plain: hit.plainLyrics || null,
+    synced: hit.syncedLyrics ? parseSyncedLyrics(hit.syncedLyrics) : null,
+    instrumental: !!hit.instrumental,
+  };
+}
+
+function getLyricsForTrack(track) {
+  if (lyricsCache.has(track.id)) return lyricsCache.get(track.id);
+  const promise = fetchLyricsResult(track);
+  lyricsCache.set(track.id, promise);
+  return promise;
+}
+
+function renderLyricsPanel(lyrics) {
+  activeLyricsLineIndex = -1;
+  el.lyricsPanel.innerHTML = "";
+  if (lyrics.instrumental) {
+    el.lyricsPanel.innerHTML = `<p class="status-msg lyrics-empty">🎧 This track is instrumental — no lyrics.</p>`;
+    return;
+  }
+  if (lyrics.synced && lyrics.synced.length) {
+    lyrics.synced.forEach((line, i) => {
+      const p = document.createElement("p");
+      p.className = "lyrics-line";
+      p.dataset.index = i;
+      p.textContent = line.text || "♪";
+      el.lyricsPanel.appendChild(p);
+    });
+    return;
+  }
+  if (lyrics.plain) {
+    const p = document.createElement("p");
+    p.className = "lyrics-plain";
+    p.textContent = lyrics.plain;
+    el.lyricsPanel.appendChild(p);
+    return;
+  }
+  el.lyricsPanel.innerHTML = `<p class="status-msg lyrics-empty">No lyrics found for this song.</p>`;
+}
+
+async function showLyricsForCurrentTrack() {
+  const track = queue[queueIndex];
+  if (!track) return;
+  currentLyrics = null;
+  el.lyricsPanel.innerHTML = `<p class="status-msg lyrics-empty"><span class="spinner"></span>Loading lyrics…</p>`;
+  try {
+    const lyrics = await getLyricsForTrack(track);
+    if (queue[queueIndex] !== track || !lyricsViewActive) return; // track/view changed while fetching
+    currentLyrics = lyrics;
+    renderLyricsPanel(lyrics);
+  } catch (err) {
+    if (queue[queueIndex] !== track || !lyricsViewActive) return;
+    console.error("Lyrics lookup failed", err);
+    el.lyricsPanel.innerHTML = `<p class="status-msg lyrics-empty">Couldn't load lyrics.</p>`;
+  }
+}
+
+// Cheap linear scan (a synced lyric file is at most a couple hundred lines)
+// run on the same timeupdate tick the seek bar already updates on — not a
+// per-frame cost, and only does anything while the lyrics panel is open.
+function updateActiveLyricsLine(current) {
+  if (!currentLyrics || !currentLyrics.synced || !currentLyrics.synced.length) return;
+  const lines = currentLyrics.synced;
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].time <= current) idx = i;
+    else break;
+  }
+  if (idx === activeLyricsLineIndex) return;
+  activeLyricsLineIndex = idx;
+  const prevActive = el.lyricsPanel.querySelector(".lyrics-line.active");
+  if (prevActive) prevActive.classList.remove("active");
+  if (idx < 0) return;
+  const lineEl = el.lyricsPanel.querySelector(`.lyrics-line[data-index="${idx}"]`);
+  if (lineEl) {
+    lineEl.classList.add("active");
+    lineEl.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+function toggleLyricsView() {
+  lyricsViewActive = !lyricsViewActive;
+  el.fullPlayerArt.classList.toggle("hidden", lyricsViewActive);
+  el.lyricsPanel.classList.toggle("hidden", !lyricsViewActive);
+  el.lyricsBtn.classList.toggle("icon-active", lyricsViewActive);
+  if (lyricsViewActive) showLyricsForCurrentTrack();
+}
+el.lyricsBtn.addEventListener("click", toggleLyricsView);
+
 // ---------- Swipe gestures ----------
 // Taps are handled via a plain native "click" listener — that event is
 // guaranteed by the browser to target the exact element the touch landed on
@@ -1331,7 +1496,11 @@ function attachSwipe(element, handlers) {
   element.addEventListener(
     "touchstart",
     (e) => {
-      ignore = !!e.target.closest("button, input, .row-menu-btn");
+      // .lyrics-panel is excluded too — it's the one scrollable area inside
+      // the full player, and swipe-down-to-dismiss would otherwise hijack
+      // any vertical drag past 15px (see touchmove below) before native
+      // scrolling ever gets a chance to run.
+      ignore = !!e.target.closest("button, input, .row-menu-btn, .lyrics-panel");
       if (ignore) return;
       const t = e.touches[0];
       startX = t.clientX;

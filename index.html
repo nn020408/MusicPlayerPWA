@@ -165,6 +165,11 @@
       </button>
       <span class="full-player-subtitle">Now Playing</span>
       <div class="full-player-header-actions">
+        <button id="lyrics-btn" class="icon-btn" title="Lyrics">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 7h10M5 12h14M8 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
         <button id="up-next-btn" class="icon-btn" title="Up next">
           <svg class="icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M3 6h13M3 12h13M3 18h7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -178,6 +183,10 @@
       <img id="full-art" class="hidden" alt="" />
       <span id="full-art-fallback">🎵</span>
     </div>
+    <!-- Occupies the exact same spot as .full-player-art above — toggled by
+         lyrics-btn, never shown at the same time as the art (see
+         toggleLyricsView in app.js). -->
+    <div id="lyrics-panel" class="lyrics-panel hidden"></div>
     <div class="full-player-meta">
       <h2 id="full-title">—</h2>
       <p id="full-artist">—</p>
