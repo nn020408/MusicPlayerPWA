@@ -1174,6 +1174,12 @@ player.onTrackChange = (item) => {
   // item.audio.artist (see fetchLyricsResult), since that's the exact
   // title/artist actually shown on screen, not OneDrive's lighter metadata.
   currentRealTags = null;
+  // A fresh promise per track that onRealTags resolves — lets a lyrics fetch
+  // started before the real tag arrives wait for it once instead of firing
+  // twice (fetch now with weak data, fetch again once better data shows up).
+  realTagsPromise = new Promise((resolve) => {
+    resolveRealTagsPromise = resolve;
+  });
 
   el.miniArt.classList.add("hidden");
   el.miniArtFallback.classList.remove("hidden");
@@ -1267,13 +1273,9 @@ player.onRealTags = (tags) => {
   // player.js only guarantees this fires for whatever's still current, so
   // it's safe to trust queue[queueIndex] here (see the guard in playCurrent).
   currentRealTags = tags;
-  // Covers tapping Lyrics fast enough that this hadn't resolved yet — that
-  // first lookup used the less reliable item.audio.artist and got cached
-  // under this track's id, so redo it now that the same title/artist shown
-  // on screen is available to match with.
-  if (lyricsViewActive && queue[queueIndex]) {
-    lyricsCache.delete(queue[queueIndex].id);
-    showLyricsForCurrentTrack();
+  if (resolveRealTagsPromise) {
+    resolveRealTagsPromise(tags);
+    resolveRealTagsPromise = null;
   }
 };
 
@@ -1362,7 +1364,22 @@ let currentLyrics = null; // { plain, synced: [{time,text}]|null, instrumental }
 // reliable match target than item.audio (OneDrive's lighter folder-listing
 // metadata, which fetchLyricsResult falls back to when this isn't set yet).
 let currentRealTags = null;
+// Reset per track in onTrackChange, resolved once in onRealTags — lets a
+// lyrics fetch that starts before the real tag arrives wait for it once
+// instead of firing again reactively when it shows up (that was the
+// double-fetch/double-"Loading lyrics…" bug).
+let realTagsPromise = null;
+let resolveRealTagsPromise = null;
 let activeLyricsLineIndex = -1;
+
+// Waits briefly for the real tag read to resolve (if one's in flight for the
+// current track) rather than immediately settling for weaker metadata —
+// bounded so a slow/failed tag read can't hang the lyrics fetch indefinitely.
+function waitForRealTags(timeoutMs) {
+  if (currentRealTags) return Promise.resolve(currentRealTags);
+  if (!realTagsPromise) return Promise.resolve(null);
+  return Promise.race([realTagsPromise, new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))]);
+}
 
 function parseSyncedLyrics(lrc) {
   const lines = [];
@@ -1480,11 +1497,11 @@ function bestScoredMatch(results, wantTitle, wantArtist, wantDuration) {
 async function fetchLyricsResult(track) {
   // Prefer the real embedded tag (currentRealTags — the exact title/artist
   // shown on screen) over item.audio, OneDrive's lighter folder-listing
-  // metadata that can be empty or wrong even when the real tag is fine.
-  // Only trusted if it actually belongs to this track (guarded already in
-  // player.onRealTags, but track could still be a different queue entry
-  // being looked up e.g. from Up Next).
-  const realTags = queue[queueIndex] === track ? currentRealTags : null;
+  // metadata that can be empty or wrong even when the real tag is fine. If
+  // the tag read is still in flight for this track, wait up to 3s for it —
+  // one fetch with the best available data, instead of fetching now and
+  // potentially again once the real tag shows up.
+  const realTags = queue[queueIndex] === track ? await waitForRealTags(3000) : null;
 
   const rawTitle = (realTags && realTags.title) || track.name.replace(/\.[^/.]+$/, "");
   const cleanTitle = cleanTrackTitle(rawTitle);
