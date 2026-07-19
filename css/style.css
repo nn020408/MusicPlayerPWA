@@ -79,7 +79,8 @@ button { font-family: inherit; }
 .top-bar h1 { font-size: 20px; margin: 0; }
 .top-bar-actions { display: flex; gap: 6px; }
 
-.icon-btn.small { font-size: 18px; background: none; border: none; color: var(--text); padding: 6px; cursor: pointer; }
+.icon-btn { background: none; border: none; color: var(--text); font-size: 22px; padding: 8px; cursor: pointer; line-height: 1; }
+.icon-btn.small { font-size: 18px; padding: 6px; }
 
 /* Tap feedback so buttons never feel "dead" — cheap CSS transform, no JS cost. */
 .icon-btn,
