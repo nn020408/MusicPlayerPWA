@@ -5,14 +5,12 @@ const msalInstance = new msal.PublicClientApplication({
   auth: {
     clientId: APP_CONFIG.clientId,
     authority: APP_CONFIG.authority,
-    // Always the site root, regardless of what path the app was actually
-    // opened from — the home-screen shortcut launches via the manifest's
-    // start_url ("/index.html"), which doesn't match the root path
-    // registered as the redirect URI in Azure. Using window.location.pathname
-    // here would send a redirect_uri that only matches when opened via a
-    // plain browser tab at "/", causing "redirect_uri is not valid" from
-    // the shortcut specifically.
-    redirectUri: window.location.origin + "/",
+    // The directory containing index.html (works whether the app is hosted
+    // at the domain root or under a subpath, e.g. GitHub Pages project sites
+    // at "https://user.github.io/repo/"). manifest.json's start_url/scope are
+    // both "./" (relative), so the home-screen shortcut resolves to this same
+    // directory too — keeping this in sync with however the app was opened.
+    redirectUri: window.location.origin + window.location.pathname.replace(/[^/]*$/, ""),
   },
   cache: {
     cacheLocation: "localStorage",
