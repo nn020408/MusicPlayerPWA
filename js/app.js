@@ -71,6 +71,7 @@ const el = {
 
   fullPlayer: document.getElementById("full-player"),
   fullPlayerCloseBtn: document.getElementById("full-player-close-btn"),
+  upNextBtn: document.getElementById("up-next-btn"),
   addToPlaylistBtn: document.getElementById("add-to-playlist-btn"),
   fullArt: document.getElementById("full-art"),
   fullArtFallback: document.getElementById("full-art-fallback"),
@@ -95,6 +96,16 @@ const el = {
   folderPlayBtn: document.getElementById("folder-play-btn"),
   folderAddPlaylistBtn: document.getElementById("folder-add-playlist-btn"),
   folderActionsCancelBtn: document.getElementById("folder-actions-cancel-btn"),
+
+  playlistActionsModal: document.getElementById("playlist-actions-modal"),
+  playlistActionsTitle: document.getElementById("playlist-actions-title"),
+  playlistRenameBtn: document.getElementById("playlist-rename-btn"),
+  playlistDeleteBtn: document.getElementById("playlist-delete-btn"),
+  playlistActionsCancelBtn: document.getElementById("playlist-actions-cancel-btn"),
+
+  upNextOverlay: document.getElementById("up-next-overlay"),
+  upNextCloseBtn: document.getElementById("up-next-close-btn"),
+  upNextList: document.getElementById("up-next-list"),
 };
 
 let libraryLoaded = false;
@@ -746,14 +757,43 @@ function renderPlaylistsList() {
     });
     row.querySelector(".row-menu-btn").addEventListener("click", (e) => {
       e.stopPropagation();
-      if (confirm(`Delete playlist "${pl.name}"?`)) {
-        deletePlaylist(pl.id);
-        renderPlaylistsList();
-      }
+      openPlaylistActionsModal(pl);
     });
     el.playlistsList.appendChild(row);
   });
 }
+
+// ---------- Playlist actions (3-dot menu on a playlist row: rename/delete) ----------
+let pendingPlaylistForActions = null;
+
+function openPlaylistActionsModal(playlist) {
+  pendingPlaylistForActions = playlist;
+  el.playlistActionsTitle.textContent = playlist.name;
+  el.playlistActionsModal.classList.remove("hidden");
+}
+
+el.playlistActionsCancelBtn.addEventListener("click", () => el.playlistActionsModal.classList.add("hidden"));
+
+el.playlistRenameBtn.addEventListener("click", () => {
+  el.playlistActionsModal.classList.add("hidden");
+  const playlist = pendingPlaylistForActions;
+  if (!playlist) return;
+  const name = prompt("Rename playlist:", playlist.name);
+  if (name && name.trim() && name.trim() !== playlist.name) {
+    renamePlaylist(playlist.id, name.trim());
+    renderPlaylistsList();
+  }
+});
+
+el.playlistDeleteBtn.addEventListener("click", () => {
+  el.playlistActionsModal.classList.add("hidden");
+  const playlist = pendingPlaylistForActions;
+  if (!playlist) return;
+  if (confirm(`Delete playlist "${playlist.name}"?`)) {
+    deletePlaylist(playlist.id);
+    renderPlaylistsList();
+  }
+});
 
 el.playlistsBtn.addEventListener("click", () => {
   renderPlaylistsList();
@@ -1181,6 +1221,34 @@ el.addToPlaylistBtn.addEventListener("click", () => {
   if (track) openAddToPlaylistModal(track);
 });
 
+// ---------- Up Next ----------
+// Jumps within the CURRENT queue/play order (via playIndex) rather than
+// replacing it with setQueue — tapping an upcoming track should just skip
+// ahead to it, not turn "what's next" into a brand new queue.
+function openUpNextView() {
+  const upcoming = getUpcomingTracks(30);
+  el.upNextList.innerHTML = "";
+  if (upcoming.length === 0) {
+    const msg = repeatMode === "one" ? "Repeat is set to this song only." : "Nothing queued after this.";
+    el.upNextList.innerHTML = `<p class="status-msg">${msg}</p>`;
+  }
+  upcoming.forEach((track) => {
+    el.upNextList.appendChild(
+      trackRow(track, {
+        onPlay: () => {
+          const idx = queue.indexOf(track);
+          el.upNextOverlay.classList.add("hidden");
+          if (idx !== -1) playIndex(idx);
+        },
+        onMenu: () => openAddToPlaylistModal(track),
+      })
+    );
+  });
+  el.upNextOverlay.classList.remove("hidden");
+}
+el.upNextBtn.addEventListener("click", openUpNextView);
+el.upNextCloseBtn.addEventListener("click", () => el.upNextOverlay.classList.add("hidden"));
+
 // ---------- Swipe gestures ----------
 // Taps are handled via a plain native "click" listener — that event is
 // guaranteed by the browser to target the exact element the touch landed on
@@ -1275,6 +1343,16 @@ function handleBackPress() {
   }
   if (!el.addPlaylistModal.classList.contains("hidden")) {
     el.addPlaylistModal.classList.add("hidden");
+    return true;
+  }
+  if (!el.playlistActionsModal.classList.contains("hidden")) {
+    el.playlistActionsModal.classList.add("hidden");
+    return true;
+  }
+  if (!el.upNextOverlay.classList.contains("hidden")) {
+    // Sits above the full player (it's opened from within it) — close this
+    // first so back steps out one layer at a time, same as everything else.
+    el.upNextOverlay.classList.add("hidden");
     return true;
   }
   if (!el.fullPlayer.classList.contains("hidden")) {

@@ -144,9 +144,21 @@
   <!-- Full-screen Now Playing -->
   <section id="full-player" class="full-player hidden">
     <div class="full-player-header">
-      <button id="full-player-close-btn" class="icon-btn">⌄</button>
+      <button id="full-player-close-btn" class="icon-btn" title="Back to library">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
       <span class="full-player-subtitle">Now Playing</span>
-      <button id="add-to-playlist-btn" class="icon-btn">⋮</button>
+      <div class="full-player-header-actions">
+        <button id="up-next-btn" class="icon-btn" title="Up next">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 6h13M3 12h13M3 18h7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M16 15v-6l5 3-5 3z" fill="currentColor" />
+          </svg>
+        </button>
+        <button id="add-to-playlist-btn" class="icon-btn">⋮</button>
+      </div>
     </div>
     <div class="full-player-art">
       <img id="full-art" class="hidden" alt="" />
@@ -169,6 +181,15 @@
     </div>
   </section>
 
+  <!-- Up Next: preview of the upcoming queue, opened from the full player -->
+  <div id="up-next-overlay" class="overlay hidden">
+    <div class="overlay-header">
+      <h2>Up Next</h2>
+      <button id="up-next-close-btn" class="text-btn">Close</button>
+    </div>
+    <div id="up-next-list" class="file-list"></div>
+  </div>
+
   <!-- Add-to-playlist modal -->
   <div id="add-playlist-modal" class="modal hidden">
     <div class="modal-box">
@@ -186,6 +207,16 @@
       <button id="folder-play-btn" class="secondary-btn">▶ Play this folder (incl. subfolders)</button>
       <button id="folder-add-playlist-btn" class="secondary-btn">➕ Add all songs to playlist</button>
       <button id="folder-actions-cancel-btn" class="text-btn">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Playlist actions modal (3-dot menu on a playlist row) -->
+  <div id="playlist-actions-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="playlist-actions-title">Playlist</h3>
+      <button id="playlist-rename-btn" class="secondary-btn">✏️ Rename</button>
+      <button id="playlist-delete-btn" class="secondary-btn danger">🗑 Delete</button>
+      <button id="playlist-actions-cancel-btn" class="text-btn">Cancel</button>
     </div>
   </div>
 

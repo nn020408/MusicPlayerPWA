@@ -310,6 +310,9 @@ button { font-family: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .overlay-header h2 { font-size: 18px; margin: 0; flex: 1; }
+/* Opened from within the full player (z-index 30), so it needs to sit above
+   it — the shared .overlay base (20) alone isn't enough here. */
+#up-next-overlay { z-index: 32; }
 .search-header { gap: 8px; }
 #search-input {
   flex: 1;
@@ -446,8 +449,24 @@ button { font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: relative; /* anchors the subtitle below, so it stays centered
+                          regardless of how many buttons sit on either side */
 }
-.full-player-subtitle { font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+/* Centered independent of flex distribution — the right side now carries
+   two buttons (Up next + the ⋮ menu) vs. one on the left, so relying on
+   space-between alone would push the label off-center. */
+.full-player-subtitle {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+.full-player-header-actions { display: flex; align-items: center; gap: 2px; }
+.icon-svg { width: 22px; height: 22px; display: block; }
 .full-player-art {
   flex: 1;
   display: flex;

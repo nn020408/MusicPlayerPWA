@@ -266,6 +266,29 @@ function playPrevious() {
   }
 }
 
+// Pure lookahead over playOrder/queue — both already sit in memory (the
+// queue was built from a folder/search/playlist that's already loaded, and
+// shuffle order is computed once by buildOrder), so this is just array
+// indexing with no network call and no measurable cost either way.
+function getUpcomingTracks(maxCount) {
+  if (repeatMode === "one") {
+    const current = queue[queueIndex];
+    return current ? [current] : [];
+  }
+  const upcoming = [];
+  const limit = Math.min(maxCount, playOrder.length - 1);
+  let pos = orderPos;
+  for (let i = 0; i < limit; i++) {
+    pos++;
+    if (pos >= playOrder.length) {
+      if (repeatMode === "all") pos = 0;
+      else break;
+    }
+    upcoming.push(queue[playOrder[pos]]);
+  }
+  return upcoming;
+}
+
 function seekTo(seconds) {
   audioEl.currentTime = seconds;
 }
