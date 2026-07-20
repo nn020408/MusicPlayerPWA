@@ -706,8 +706,18 @@ function openFolderPicker(mode) {
   fpStack = [{ id: "root", name: "OneDrive" }];
   el.folderPickerCancelBtn.classList.toggle("hidden", mode !== "change");
   el.folderPickerHeading.textContent = mode === "onboarding" ? "Select your music folder" : "Change music folder";
+  // The mini player sits above overlays (z-index 25 vs 20) so it stays
+  // visible over search/settings/etc — but here it would float directly on
+  // top of the "Use this folder" button and eat its taps. Hide it for the
+  // duration, same trick used for select mode.
+  el.nowPlayingBar.classList.add("select-mode-hidden");
   el.folderPickerOverlay.classList.remove("hidden");
   loadFpFolder("root");
+}
+
+function closeFolderPicker() {
+  el.folderPickerOverlay.classList.add("hidden");
+  el.nowPlayingBar.classList.remove("select-mode-hidden");
 }
 
 el.fpHomeBtn.addEventListener("click", () => {
@@ -722,13 +732,13 @@ el.fpUseHereBtn.addEventListener("click", () => {
   // before ever reaching the exit confirmation.
   const chosen = fpStack[fpStack.length - 1];
   setLibraryFolder(chosen);
-  el.folderPickerOverlay.classList.add("hidden");
+  closeFolderPicker();
   openMainFolderView([chosen]);
   ensureLibraryLoaded(); // covers first-time folder selection and later changes, not just later app opens
 });
 
 el.folderPickerCancelBtn.addEventListener("click", () => {
-  el.folderPickerOverlay.classList.add("hidden");
+  closeFolderPicker();
 });
 
 function setLibraryFolder(folder) {
@@ -1768,7 +1778,7 @@ function handleBackPress() {
     // At the picker's own root: onboarding has no Cancel button — it's
     // mandatory, so back shouldn't be able to dismiss it there.
     if (!el.folderPickerCancelBtn.classList.contains("hidden")) {
-      el.folderPickerOverlay.classList.add("hidden");
+      closeFolderPicker();
       return true;
     }
     return true; // onboarding, nothing to do, but still consume the back press
