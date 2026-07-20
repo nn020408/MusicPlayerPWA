@@ -45,6 +45,7 @@ const el = {
   restoreFileInput: document.getElementById("restore-file-input"),
   scanStatus: document.getElementById("scan-status"),
   themeList: document.getElementById("theme-list"),
+  appVersionLabel: document.getElementById("app-version-label"),
 
   detailOverlay: document.getElementById("detail-overlay"),
   detailBackBtn: document.getElementById("detail-back-btn"),
@@ -1901,4 +1902,17 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch((err) => console.warn("SW registration failed", err));
   });
+
+  // Settings shows this so a deploy can be visually confirmed instead of
+  // guessed at — it's just the service worker's own CACHE_NAME. Re-requested
+  // on controllerchange too, since sw.js skipWaiting()s + claims clients, so
+  // an already-open tab can pick up a new version without a manual reload.
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "version") el.appVersionLabel.textContent = event.data.value;
+  });
+  const requestVersion = () => {
+    if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage("getVersion");
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", requestVersion);
+  navigator.serviceWorker.ready.then(requestVersion);
 }

@@ -24,6 +24,13 @@ self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
+// Lets the page display which shell version it's actually running (Settings
+// screen) — a quick way to confirm a deploy took effect instead of guessing
+// from stale caches.
+self.addEventListener("message", (event) => {
+  if (event.data === "getVersion") event.source.postMessage({ type: "version", value: CACHE_NAME });
+});
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
