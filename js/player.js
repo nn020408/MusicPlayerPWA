@@ -12,6 +12,7 @@ let shuffleOn = false;
 let repeatMode = "off"; // "off" | "all" | "one"
 let playStartedAt = 0; // ms timestamp, used to guess when a downloadUrl may have expired
 let currentArtBlobUrl = null; // tracks the last embedded-art blob URL so we can revoke it
+let currentBlobUrl = null; // tracks the audio object URL backing audioEl.src (if any), so we can revoke it once we move off it
 
 // Streaming URLs for the *next* track are fetched ahead of time (while the
 // current one is still playing, screen presumably on) so that advancing to
@@ -22,14 +23,76 @@ let currentArtBlobUrl = null; // tracks the last embedded-art blob URL so we can
 // audio, not JS-dependent); it's specifically the *transition* to the next
 // one that this is protecting.
 const prefetchedUrls = new Map(); // itemId -> streaming url
+const urlPrefetchPromises = new Map(); // itemId -> in-flight/settled Promise<url>, so blob prefetch can reuse it
 
 function prefetchDownloadUrl(item) {
-  if (!item || prefetchedUrls.has(item.id)) return;
-  getDownloadUrl(item)
+  if (!item) return null;
+  if (prefetchedUrls.has(item.id)) return Promise.resolve(prefetchedUrls.get(item.id));
+  if (urlPrefetchPromises.has(item.id)) return urlPrefetchPromises.get(item.id);
+  const promise = getDownloadUrl(item)
     .then((url) => {
       if (url) prefetchedUrls.set(item.id, url);
+      return url;
     })
-    .catch(() => {});
+    .catch(() => null)
+    .finally(() => urlPrefetchPromises.delete(item.id));
+  urlPrefetchPromises.set(item.id, promise);
+  return promise;
+}
+
+// Prefetching just the *streaming URL* above still leaves the actual next-
+// track handoff dependent on opening a fresh HTTP connection and buffering
+// it when .play() is called — exactly the kind of network+JS work that can
+// get stuck if the screen locks right as the current track ends (mobile
+// browsers exempt "audibly playing" tabs from background throttling, but
+// that exemption is fragile in the brief silent gap between tracks). So we
+// also pull down the *entire next track's bytes* into a Blob ahead of time,
+// while the current track is still playing (screen presumably on) — the
+// eventual swap then only needs a synchronous object-URL assignment, no
+// network I/O, giving it the best chance of completing before/without
+// hitting that freeze window. Only ever one track ahead, same scope as the
+// URL prefetch above, to keep memory/bandwidth bounded.
+const prefetchedBlobUrls = new Map(); // itemId -> object URL (already downloaded, not yet consumed)
+let blobPrefetch = null; // { itemId, controller } for the in-flight download, if any
+
+function revokeStaleBlobPrefetches(exceptItemId) {
+  for (const [id, url] of prefetchedBlobUrls) {
+    if (id !== exceptItemId) {
+      URL.revokeObjectURL(url);
+      prefetchedBlobUrls.delete(id);
+    }
+  }
+}
+
+function prefetchNextTrackBlob(item) {
+  if (!item || prefetchedBlobUrls.has(item.id)) return;
+  if (blobPrefetch && blobPrefetch.itemId === item.id) return;
+  // Respect an explicit data-saver signal — this trades bandwidth for
+  // reliability, which isn't the right call for someone who's opted into
+  // saving data. (Network Information API isn't universal; feature-detect.)
+  if (navigator.connection && navigator.connection.saveData) return;
+
+  revokeStaleBlobPrefetches(item.id);
+  if (blobPrefetch) blobPrefetch.controller.abort();
+
+  const controller = new AbortController();
+  const entry = { itemId: item.id, controller };
+  blobPrefetch = entry;
+
+  prefetchDownloadUrl(item)
+    .then((url) => {
+      if (!url || controller.signal.aborted) return null;
+      return fetch(url, { signal: controller.signal }).then((res) => (res.ok ? res.blob() : null));
+    })
+    .then((blob) => {
+      if (blob && !controller.signal.aborted) {
+        prefetchedBlobUrls.set(item.id, URL.createObjectURL(blob));
+      }
+    })
+    .catch(() => {}) // aborted or network failure — falls back to streaming the URL like before
+    .finally(() => {
+      if (blobPrefetch === entry) blobPrefetch = null;
+    });
 }
 
 // ---------- Remembering what was playing across app restarts ----------
@@ -159,19 +222,30 @@ async function playCurrent() {
     if (nextItem) {
       getThumbnailUrl(nextItem.id); // pre-warm cache so skipping feels instant
       prefetchDownloadUrl(nextItem); // see comment above prefetchedUrls — keeps auto-advance working screen-off
+      prefetchNextTrackBlob(nextItem); // see comment above prefetchedBlobUrls — same goal, stronger guarantee
     }
   }
 
   try {
     player.onStatus && player.onStatus(`Loading "${item.name}"…`);
-    let url = prefetchedUrls.get(item.id);
+    let url = prefetchedBlobUrls.get(item.id);
+    let usedBlobUrl = url || null;
     if (url) {
-      prefetchedUrls.delete(item.id);
+      prefetchedBlobUrls.delete(item.id);
     } else {
-      url = await getDownloadUrl(item);
+      url = prefetchedUrls.get(item.id);
+      if (url) {
+        prefetchedUrls.delete(item.id);
+      } else {
+        url = await getDownloadUrl(item);
+      }
     }
     if (!url) throw new Error("No download URL returned by OneDrive for this file");
     audioEl.src = url;
+    // Safe to revoke now — audioEl.src was reassigned above, so nothing
+    // still references the previous blob (if any).
+    if (currentBlobUrl && currentBlobUrl !== usedBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = usedBlobUrl;
     playStartedAt = Date.now();
 
     // Kick off the real-tag read (including embedded cover art) as soon as we
