@@ -1130,20 +1130,56 @@ function applyRealArt(url) {
   el.fullArtFallback.classList.add("hidden");
 }
 
+// Same scoring discipline as scoreLyricsCandidate/LYRICS_MATCH_THRESHOLD
+// below — this used to just trust iTunes' top result blindly (limit=1, no
+// verification), which for less mainstream genres (regional/vallenato etc.,
+// where iTunes' catalog is thin) reliably returned some other band's cover
+// entirely instead of admitting "no match" and falling back to the
+// placeholder. Confirmed by a user report showing 4-5 confidently wrong
+// covers in a row.
+function scoreArtworkCandidate(candidate, wantTitle, wantArtist) {
+  let score = 0;
+  const nWant = normalizeForCompare(wantTitle);
+  const nGot = normalizeForCompare(candidate.trackName);
+  if (nGot === nWant) score += 3;
+  else if (nWant && (nGot.includes(nWant) || nWant.includes(nGot))) score += 1.5;
+
+  const nWantArtist = normalizeForCompare(wantArtist);
+  const nGotArtist = normalizeForCompare(candidate.artistName);
+  if (nWantArtist) {
+    if (nGotArtist === nWantArtist) score += 3;
+    else if (nGotArtist.includes(nWantArtist) || nWantArtist.includes(nGotArtist)) score += 1.5;
+  }
+  return score;
+}
+
+const ARTWORK_MATCH_THRESHOLD = 4; // same bar as lyrics — an exact title alone isn't enough without the artist agreeing too
+
 // Last resort: look up the song by artist/title in Apple's public music
-// catalog. This is the only art source that leaves the app/OneDrive — it
-// sends just the artist + title text, and it's a best-effort text match, so
-// it can occasionally return the wrong cover for less common tracks.
+// catalog. This is the only art source that leaves the app/OneDrive — it's a
+// best-effort text match, so several candidates are scored against what was
+// actually asked for rather than trusting whichever one comes back first.
 async function findOnlineArtwork(title, artist) {
-  const term = `${artist} ${title}`.trim();
+  const cleanTitle = cleanTrackTitle(title);
+  const cleanArtist = artist ? primaryArtist(artist) : "";
+  const term = `${cleanArtist} ${cleanTitle}`.trim();
   if (!term) return null;
   try {
-    const res = await fetch(`https://itunes.apple.com/search?media=music&limit=1&term=${encodeURIComponent(term)}`);
+    const res = await fetch(`https://itunes.apple.com/search?media=music&limit=5&term=${encodeURIComponent(term)}`);
     if (!res.ok) return null;
     const data = await res.json();
-    const result = data.results && data.results[0];
-    if (!result || !result.artworkUrl100) return null;
-    return result.artworkUrl100.replace("100x100", "600x600"); // ask for a bigger version than the default thumbnail
+    const results = data.results || [];
+    let best = null;
+    let bestScore = -Infinity;
+    for (const candidate of results) {
+      const score = scoreArtworkCandidate(candidate, cleanTitle, cleanArtist);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    if (!best || bestScore < ARTWORK_MATCH_THRESHOLD || !best.artworkUrl100) return null;
+    return best.artworkUrl100.replace("100x100", "600x600"); // ask for a bigger version than the default thumbnail
   } catch (err) {
     return null;
   }
@@ -1523,6 +1559,24 @@ function bestScoredMatch(results, wantTitle, wantArtist, wantDuration) {
   return bestScore >= LYRICS_MATCH_THRESHOLD ? best : null;
 }
 
+// LRCLIB is a smaller, mostly community/synced-lyrics-focused database — some
+// perfectly ordinary songs just aren't in it at all (not a matching problem,
+// a coverage gap). lyrics.ovh is a free, keyless, plain-text-only lyrics API
+// with broader mainstream/older-catalog coverage, tried only after LRCLIB's
+// own 4-strategy cascade below has already come up completely empty. No
+// synced timestamps, and no alternate candidates to score against (it's a
+// direct lookup, not a search), so this is strictly a last resort.
+async function lyricsOvhGet(artist, title) {
+  try {
+    const res = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.lyrics || null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchLyricsResult(track) {
   // Prefer the real embedded tag (currentRealTags — the exact title/artist
   // shown on screen) over item.audio, OneDrive's lighter folder-listing
@@ -1575,12 +1629,18 @@ async function fetchLyricsResult(track) {
     hit = bestScoredMatch(results, cleanTitle, "", duration);
   }
 
-  if (!hit) return { plain: null, synced: null, instrumental: false };
-  return {
-    plain: hit.plainLyrics || null,
-    synced: hit.syncedLyrics ? parseSyncedLyrics(hit.syncedLyrics) : null,
-    instrumental: !!hit.instrumental,
-  };
+  if (hit) {
+    return {
+      plain: hit.plainLyrics || null,
+      synced: hit.syncedLyrics ? parseSyncedLyrics(hit.syncedLyrics) : null,
+      instrumental: !!hit.instrumental,
+    };
+  }
+
+  // 5) LRCLIB has nothing at all for this track — try the broader-coverage
+  // plain-text fallback before giving up (see lyricsOvhGet above).
+  const plainFallback = artist && cleanTitle ? await lyricsOvhGet(artist, cleanTitle) : null;
+  return { plain: plainFallback, synced: null, instrumental: false };
 }
 
 function getLyricsForTrack(track) {
