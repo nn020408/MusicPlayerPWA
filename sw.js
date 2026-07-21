@@ -2,11 +2,15 @@
 // We deliberately do NOT cache audio or Graph API responses since this app
 // is streaming-only by design (no offline playback).
 
-const CACHE_NAME = "musicplayer-shell-v51";
+const CACHE_NAME = "musicplayer-shell-v58";
 const SHELL_FILES = [
   "./",
   "./index.html",
   "./css/style.css",
+  "./js/vendor/capacitor-core.js",
+  "./js/vendor/capacitor-media-session.js",
+  "./js/vendor/capacitor-browser.js",
+  "./js/vendor/capacitor-app.js",
   "./js/config.js",
   "./js/auth.js",
   "./js/graph.js",
@@ -22,13 +26,6 @@ const SHELL_FILES = [
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES)));
   self.skipWaiting();
-});
-
-// Lets the page display which shell version it's actually running (Settings
-// screen) — a quick way to confirm a deploy took effect instead of guessing
-// from stale caches.
-self.addEventListener("message", (event) => {
-  if (event.data === "getVersion") event.source.postMessage({ type: "version", value: CACHE_NAME });
 });
 
 self.addEventListener("activate", (event) => {

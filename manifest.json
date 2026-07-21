@@ -1,6 +1,6 @@
 {
-  "name": "MusicPlayer",
-  "short_name": "MusicPlayer",
+  "name": "NubePlayer",
+  "short_name": "NubePlayer",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -6,12 +6,16 @@ const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 
 // Accepts either a relative Graph path ("/me/drive/...") or a full absolute
 // URL (used for @odata.nextLink pagination, which Graph returns as a full URL).
-async function graphGet(pathOrUrl) {
+async function graphGet(pathOrUrl, { priority } = {}) {
   const token = await getAccessToken();
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : GRAPH_ROOT + pathOrUrl;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const fetchOptions = { headers: { Authorization: `Bearer ${token}` } };
+  // Fetch Priority Hints (Chrome/WebView 101+, ignored elsewhere) — lets the
+  // background library scan's requests (see listFolder) yield the shared
+  // per-origin connection pool to an interactive request (e.g. tapping play
+  // mid-scan) instead of making it queue behind up to 5 scan requests.
+  if (priority) fetchOptions.priority = priority;
+  const res = await fetch(url, fetchOptions);
   if (!res.ok) throw new Error(`Graph request failed: ${res.status}`);
   return res.json();
 }
@@ -35,7 +39,7 @@ function clearFolderListCache() {
 // Graph paginates children (~200 per page) via @odata.nextLink — folders
 // with more files than that would silently lose items if we only read the
 // first page, so we follow every page until exhausted.
-function listFolder(folderId) {
+function listFolder(folderId, { priority } = {}) {
   if (folderListCache.has(folderId)) return folderListCache.get(folderId);
 
   const promise = (async () => {
@@ -43,7 +47,7 @@ function listFolder(folderId) {
       folderId === "root" ? "/me/drive/root/children" : `/me/drive/items/${folderId}/children`;
     let items = [];
     while (nextUrl) {
-      const data = await graphGet(nextUrl);
+      const data = await graphGet(nextUrl, { priority });
       items = items.concat(data.value || []);
       nextUrl = data["@odata.nextLink"] || null;
     }

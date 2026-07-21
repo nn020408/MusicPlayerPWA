@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Hand-rolled OAuth redirect (@capacitor/browser + @capacitor/app,
+                 see js/auth.js's nativeSignIn()) — the system browser hands off
+                 to this custom scheme, delivered to MainActivity's onNewIntent
+                 and surfaced in JS via App's plain "appUrlOpen" event. No
+                 ActivityResult/requestCode plumbing involved, unlike the
+                 AppAuth-based plugin this replaced (which kept hitting
+                 Android-specific dispatch bugs). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="@string/custom_url_scheme" android:host="auth" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- @jofr/capacitor-media-session's own manifest already declares
+         FOREGROUND_SERVICE and the mediaPlayback service type; Android 14
+         (API 34) additionally requires this specific permission to start a
+         mediaPlayback-typed foreground service, and POST_NOTIFICATIONS to
+         show the persistent playback notification (requested at runtime in
+         MainActivity). Both are required for Samsung's foreground-service
+         kill exemption to actually apply. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+</manifest>

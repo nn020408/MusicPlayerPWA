@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>MusicPlayer</title>
+  <title>NubePlayer</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#121212" />
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
@@ -25,15 +25,16 @@
 
   <section id="login-screen" class="screen">
     <div class="login-box">
-      <h1>MusicPlayer</h1>
+      <h1>NubePlayer</h1>
       <p>Stream your music straight from OneDrive.</p>
       <button id="sign-in-btn" class="primary-btn">Sign in with Microsoft</button>
+      <p class="settings-hint login-version">Version: <span id="login-version-label">—</span></p>
     </div>
   </section>
 
   <section id="app-screen" class="screen hidden">
     <header id="top-bar" class="top-bar">
-      <h1>MusicPlayer</h1>
+      <h1>NubePlayer</h1>
       <div class="top-bar-actions">
         <button id="shuffle-view-btn" class="icon-btn small" title="Shuffle play everything shown here">🔀</button>
         <button id="search-btn" class="icon-btn small" title="Search">🔍</button>
@@ -247,6 +248,15 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
+  <!-- Vendored Capacitor bridge + media-session plugin (js/vendor/) — only
+       do anything inside the Android app wrapper; harmless no-op here on the
+       plain website (their "web" fallback just forwards to navigator.
+       mediaSession, which player.js already calls directly). See the
+       comment above nativeMediaSession() in player.js. -->
+  <script src="js/vendor/capacitor-core.js"></script>
+  <script src="js/vendor/capacitor-media-session.js"></script>
+  <script src="js/vendor/capacitor-browser.js"></script>
+  <script src="js/vendor/capacitor-app.js"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/graph.js"></script>

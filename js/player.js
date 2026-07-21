@@ -4,6 +4,17 @@
 const audioEl = new Audio();
 audioEl.preload = "auto";
 
+// Only present inside the Capacitor-wrapped Android app (js/vendor/) — a
+// real Android foreground service tied to media playback, which is what
+// actually survives Samsung's background process killing. navigator.
+// mediaSession alone (used below, unconditionally) only gets the browser's
+// best-effort background exemption, which Samsung ignores regardless of
+// battery-optimization settings. Harmless no-op everywhere else (the plain
+// website, or if the vendor scripts ever fail to load).
+function nativeMediaSession() {
+  return window.Capacitor && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins.MediaSession;
+}
+
 let queue = [];
 let queueIndex = -1;
 let playOrder = []; // sequence of indices into `queue` — the actual play order
@@ -273,14 +284,23 @@ async function playCurrent() {
 
       if (!tags.artist && !tags.album && !tags.title && !pictureUrl) return;
 
+      const title = tags.title || item.name.replace(/\.[^/.]+$/, "");
+      const artist = tags.artist || (item.audio && item.audio.artist) || "OneDrive";
+      const album = tags.album || (item.audio && item.audio.album) || "";
+
       if ("mediaSession" in navigator && navigator.mediaSession.metadata) {
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: tags.title || item.name.replace(/\.[^/.]+$/, ""),
-          artist: tags.artist || (item.audio && item.audio.artist) || "OneDrive",
-          album: tags.album || (item.audio && item.audio.album) || "",
+          title,
+          artist,
+          album,
           artwork: pictureUrl ? [{ src: pictureUrl, sizes: "512x512", type: tags.picture.mimeType }] : [],
         });
       }
+      const native = nativeMediaSession();
+      // Native artwork is skipped: the plugin's Android side can't turn a
+      // blob: URL into a Bitmap (only http/base64), so passing it would just
+      // log a warning and no-op — title/artist/album still update fine.
+      if (native) native.setMetadata({ title, artist, album, artwork: [] });
       player.onRealTags && player.onRealTags({ ...tags, pictureUrl });
     });
   } catch (err) {
@@ -367,6 +387,33 @@ function seekTo(seconds) {
   audioEl.currentTime = seconds;
 }
 
+// Clears all in-memory playback state — used on sign-out so the mini-player
+// and queue don't keep showing the previous session's (or previous account's)
+// track through a sign-out/sign-in cycle. Storage-level state (lastPlaybackState)
+// is cleared separately by the caller; this only handles the live runtime state.
+function resetPlayer() {
+  audioEl.pause();
+  audioEl.removeAttribute("src");
+  audioEl.load();
+  queue = [];
+  queueIndex = -1;
+  playOrder = [];
+  orderPos = -1;
+  hasPendingResume = false;
+  pendingResumeIndex = -1;
+  pendingResumePosition = 0;
+  if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+  currentBlobUrl = null;
+  if (currentArtBlobUrl) URL.revokeObjectURL(currentArtBlobUrl);
+  currentArtBlobUrl = null;
+  for (const url of prefetchedBlobUrls.values()) URL.revokeObjectURL(url);
+  prefetchedBlobUrls.clear();
+  prefetchedUrls.clear();
+  urlPrefetchPromises.clear();
+  if (blobPrefetch) blobPrefetch.controller.abort();
+  blobPrefetch = null;
+}
+
 // If a downloadUrl (valid ~1hr) expired mid-playback, refetch it and resume
 // from the same position instead of just failing.
 audioEl.addEventListener("error", async () => {
@@ -394,10 +441,17 @@ audioEl.addEventListener("error", async () => {
 
 audioEl.addEventListener("play", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+  nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: "playing" });
   player.onPlayStateChange && player.onPlayStateChange(true);
 });
 audioEl.addEventListener("pause", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+  // Also fires on natural track-end (the spec fires "pause" just before
+  // "ended") — capacitor.config.json sets foregroundService: "always" so
+  // this does NOT tear down the Android foreground service the way the
+  // plugin's default "only during playback" mode would; it only updates the
+  // notification's play/pause icon.
+  nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: "paused" });
   player.onPlayStateChange && player.onPlayStateChange(false);
   savePlaybackState();
 });
@@ -427,17 +481,30 @@ document.addEventListener("visibilitychange", () => {
 });
 
 function updateMediaSessionMetadata(item) {
-  if (!("mediaSession" in navigator)) return;
-  navigator.mediaSession.metadata = new MediaMetadata({
-    title: item.name.replace(/\.[^/.]+$/, ""),
-    artist: (item.audio && item.audio.artist) || "OneDrive",
-    album: (item.audio && item.audio.album) || "",
-  });
-  navigator.mediaSession.setActionHandler("play", () => audioEl.play());
-  navigator.mediaSession.setActionHandler("pause", () => audioEl.pause());
-  navigator.mediaSession.setActionHandler("previoustrack", playPrevious);
-  navigator.mediaSession.setActionHandler("nexttrack", playNext);
-  navigator.mediaSession.setActionHandler("seekto", (details) => {
-    if (details.seekTime != null) seekTo(details.seekTime);
-  });
+  const title = item.name.replace(/\.[^/.]+$/, "");
+  const artist = (item.audio && item.audio.artist) || "OneDrive";
+  const album = (item.audio && item.audio.album) || "";
+
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album });
+    navigator.mediaSession.setActionHandler("play", () => audioEl.play());
+    navigator.mediaSession.setActionHandler("pause", () => audioEl.pause());
+    navigator.mediaSession.setActionHandler("previoustrack", playPrevious);
+    navigator.mediaSession.setActionHandler("nexttrack", playNext);
+    navigator.mediaSession.setActionHandler("seekto", (details) => {
+      if (details.seekTime != null) seekTo(details.seekTime);
+    });
+  }
+
+  const native = nativeMediaSession();
+  if (native) {
+    native.setMetadata({ title, artist, album, artwork: [] });
+    native.setActionHandler({ action: "play" }, () => audioEl.play());
+    native.setActionHandler({ action: "pause" }, () => audioEl.pause());
+    native.setActionHandler({ action: "previoustrack" }, playPrevious);
+    native.setActionHandler({ action: "nexttrack" }, playNext);
+    native.setActionHandler({ action: "seekto" }, (details) => {
+      if (details.seekTime != null) seekTo(details.seekTime);
+    });
+  }
 }

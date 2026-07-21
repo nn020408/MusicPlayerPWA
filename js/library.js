@@ -127,7 +127,7 @@ async function scanLibrary(onProgress) {
   let foldersScanned = 0;
 
   async function handleFolder(folderId) {
-    const { folders, tracks: folderTracks } = await listFolder(folderId);
+    const { folders, tracks: folderTracks } = await listFolder(folderId, { priority: "low" });
     tracks.push(...folderTracks.map(slimTrack));
     foldersScanned++;
     onProgress && onProgress(foldersScanned, tracks.length);

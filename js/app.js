@@ -46,6 +46,7 @@ const el = {
   scanStatus: document.getElementById("scan-status"),
   themeList: document.getElementById("theme-list"),
   appVersionLabel: document.getElementById("app-version-label"),
+  loginVersionLabel: document.getElementById("login-version-label"),
 
   detailOverlay: document.getElementById("detail-overlay"),
   detailBackBtn: document.getElementById("detail-back-btn"),
@@ -1290,8 +1291,18 @@ player.onRealTags = (tags) => {
   }
 };
 
+// Restarts the CSS press animation even on rapid repeat taps (removing then
+// re-adding the class in the same tick wouldn't retrigger it — the reflow
+// forces the browser to notice).
+function pulsePress(button) {
+  button.classList.remove("btn-pressed");
+  void button.offsetWidth;
+  button.classList.add("btn-pressed");
+}
+
 el.miniPrevBtn.addEventListener("click", (e) => {
   e.stopPropagation();
+  pulsePress(el.miniPrevBtn);
   playPrevious();
 });
 el.miniPlayPauseBtn.addEventListener("click", (e) => {
@@ -1300,11 +1311,18 @@ el.miniPlayPauseBtn.addEventListener("click", (e) => {
 });
 el.miniNextBtn.addEventListener("click", (e) => {
   e.stopPropagation();
+  pulsePress(el.miniNextBtn);
   playNext();
 });
 el.fullPlayPauseBtn.addEventListener("click", playPause);
-el.fullNextBtn.addEventListener("click", playNext);
-el.fullPrevBtn.addEventListener("click", playPrevious);
+el.fullNextBtn.addEventListener("click", () => {
+  pulsePress(el.fullNextBtn);
+  playNext();
+});
+el.fullPrevBtn.addEventListener("click", () => {
+  pulsePress(el.fullPrevBtn);
+  playPrevious();
+});
 el.fullSeekBar.addEventListener("input", () => {
   const duration = audioEl.duration || 0;
   if (duration > 0) seekTo((Number(el.fullSeekBar.value) / 1000) * duration);
@@ -1800,10 +1818,17 @@ function handleBackPress() {
     openFolder(folderStack[folderStack.length - 1].id, false);
     return true;
   }
-  // Nothing left to close and we're at the top of folder navigation — this
-  // back press would actually exit the app, so confirm first rather than
-  // letting one stray tap close everything.
-  if (confirm("Exit MusicPlayer?")) {
+  // Nothing left to close and we're at the top of folder navigation.
+  if (isNative()) {
+    // Native convention: minimize like any normal Android app, rather than
+    // killing the process or asking "are you sure" — there's a real task
+    // switcher to bring it back from, unlike a website's back button.
+    window.Capacitor.Plugins.App.minimizeApp();
+    return true;
+  }
+  // Web has no "minimize" — this back press would actually leave the page,
+  // so confirm first rather than letting one stray tap close everything.
+  if (confirm("Exit NubePlayer?")) {
     return false; // let this back press go through and exit
   }
   return true; // stay — re-arm the guard for the next back press
@@ -1826,10 +1851,19 @@ function pushBackGuard() {
   history.pushState({ musicPlayerBackGuard: true }, "");
 }
 
-window.addEventListener("popstate", () => {
-  if (!backGuardActive) return;
-  if (handleBackPress()) pushBackGuard();
-});
+// Native's hardware back button doesn't naturally fire "popstate" the way a
+// real browser's back button does — @capacitor/app's own default handling
+// (when nothing else listens) just tries the WebView's own goBack()/history,
+// bypassing all of the above entirely. Registering our own listener hands
+// every press straight to handleBackPress() instead, no indirection.
+if (isNative()) {
+  window.Capacitor.Plugins.App.addListener("backButton", () => handleBackPress());
+} else {
+  window.addEventListener("popstate", () => {
+    if (!backGuardActive) return;
+    if (handleBackPress()) pushBackGuard();
+  });
+}
 
 // Shows whatever was last playing (title/artist/colorful placeholder) without
 // fetching anything — no download URL, no real thumbnail/ID3 read — so
@@ -1893,10 +1927,49 @@ function showLogin() {
   el.appScreen.classList.add("hidden");
 }
 
-el.signInBtn.addEventListener("click", () => signIn());
-el.signOutBtn.addEventListener("click", () => {
-  localStorage.removeItem("lastPlaybackState"); // don't carry over to whoever signs in next
-  signOut();
+el.signInBtn.addEventListener("click", async () => {
+  try {
+    await signIn();
+  } catch (err) {
+    console.error("Sign-in failed", err);
+    return;
+  }
+  // Web's signIn() navigates away (MSAL loginRedirect) before this matters;
+  // native has no such reload, so the app screen needs to be shown explicitly
+  // — without this, sign-in would silently succeed but leave you stuck on the
+  // login screen until the next manual reopen of the app.
+  if (getActiveAccount()) showApp();
+});
+el.signOutBtn.addEventListener("click", async () => {
+  if (!confirm("Sign out of NubePlayer?")) return;
+  // Full clean slate — in case whoever signs in next is a different account,
+  // nothing about the previous one (which folder was chosen, its cached
+  // library index, in-flight Graph folder listings, the queue/mini-player)
+  // should carry over. Playlists and the color theme are device/user
+  // preferences, not tied to a specific signed-in account, so those are
+  // deliberately left alone.
+  localStorage.removeItem("lastPlaybackState");
+  localStorage.removeItem(DEFAULT_FOLDER_KEY);
+  localStorage.removeItem(LIBRARY_CACHE_KEY);
+  clearFolderListCache();
+  libraryLoaded = false;
+  resetPlayer();
+  el.nowPlayingBar.classList.add("hidden");
+  // Settings (where this button lives) is a separate fixed-position overlay
+  // from #app-screen — showLogin() below only hides #app-screen, so without
+  // this, Settings (or any other overlay left open) would still be sitting
+  // on top of everything the next time showApp() runs, making it look like
+  // sign-in "took you to Settings" instead of the folder view underneath.
+  el.settingsOverlay.classList.add("hidden");
+  el.searchOverlay.classList.add("hidden");
+  el.playlistsOverlay.classList.add("hidden");
+  el.detailOverlay.classList.add("hidden");
+  el.fullPlayer.classList.add("hidden");
+  await signOut();
+  // Web's signOut() navigates away (MSAL logoutRedirect) before this matters;
+  // native has no such reload, so the login screen needs to be shown explicitly
+  // — without this the app just silently sat on the (now signed-out) app screen.
+  showLogin();
 });
 
 (async function init() {
@@ -1908,21 +1981,18 @@ el.signOutBtn.addEventListener("click", () => {
   }
 })();
 
-if ("serviceWorker" in navigator) {
+// Shown in Settings and on the login screen (el.loginVersionLabel) so a
+// deploy/build can be visually confirmed instead of guessed at — same
+// APP_VERSION constant on both web and native, since native has no service
+// worker to ask.
+el.appVersionLabel.textContent = APP_VERSION;
+el.loginVersionLabel.textContent = APP_VERSION;
+
+// Pointless inside the Capacitor app — there's nothing to cache, everything's
+// already bundled locally — and Android WebView's service worker support is
+// flaky enough there that registration just fails with a console warning.
+if ("serviceWorker" in navigator && !(window.Capacitor && window.Capacitor.isNativePlatform())) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch((err) => console.warn("SW registration failed", err));
   });
-
-  // Settings shows this so a deploy can be visually confirmed instead of
-  // guessed at — it's just the service worker's own CACHE_NAME. Re-requested
-  // on controllerchange too, since sw.js skipWaiting()s + claims clients, so
-  // an already-open tab can pick up a new version without a manual reload.
-  navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data && event.data.type === "version") el.appVersionLabel.textContent = event.data.value;
-  });
-  const requestVersion = () => {
-    if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage("getVersion");
-  };
-  navigator.serviceWorker.addEventListener("controllerchange", requestVersion);
-  navigator.serviceWorker.ready.then(requestVersion);
 }

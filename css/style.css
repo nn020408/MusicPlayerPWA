@@ -94,6 +94,7 @@ button { font-family: inherit; }
 }
 .login-box h1 { margin-bottom: 4px; }
 .login-box p { color: var(--text-dim); margin-bottom: 24px; }
+.login-version { margin-top: 20px; margin-bottom: 0; }
 
 .primary-btn {
   background: var(--accent);
@@ -156,6 +157,17 @@ button { font-family: inherit; }
   transform: scale(0.85);
   opacity: 0.6;
 }
+
+/* Stronger, guaranteed-visible "actually pushed" feedback for skip buttons —
+   a JS-triggered class (see pulsePress() in app.js) rather than relying only
+   on :active, since a fast tap can outlast the touch's active state before
+   the CSS transition is perceptible. */
+@keyframes btn-press {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.72); }
+  100% { transform: scale(1); }
+}
+.btn-pressed { animation: btn-press 220ms ease-out; }
 
 .text-btn {
   background: none;
@@ -385,7 +397,7 @@ button { font-family: inherit; }
   padding-bottom: 90px; /* clears the floating mini-player when it's showing */
 }
 
-.settings-body { padding: 16px; flex: 1; overflow-y: auto; }
+.settings-body { padding: 16px; padding-bottom: 90px; flex: 1; overflow-y: auto; }
 .settings-row { margin: 4px 0; }
 .settings-hint { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
 .settings-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
