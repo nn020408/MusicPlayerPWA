@@ -55,4 +55,8 @@
          kill exemption to actually apply. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets MainActivity show the system "Allow app to ignore battery
+         optimizations?" dialog (same one Spotify/Waze show on first launch)
+         instead of relying on the user finding the setting manually. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 </manifest>

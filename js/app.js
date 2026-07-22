@@ -47,11 +47,21 @@ const el = {
   themeList: document.getElementById("theme-list"),
   appVersionLabel: document.getElementById("app-version-label"),
   loginVersionLabel: document.getElementById("login-version-label"),
+  errorLogBtn: document.getElementById("error-log-btn"),
+
+  errorLogOverlay: document.getElementById("error-log-overlay"),
+  errorLogBackBtn: document.getElementById("error-log-back-btn"),
+  errorLogCopyBtn: document.getElementById("error-log-copy-btn"),
+  errorLogClearBtn: document.getElementById("error-log-clear-btn"),
+  errorLogList: document.getElementById("error-log-list"),
 
   detailOverlay: document.getElementById("detail-overlay"),
   detailBackBtn: document.getElementById("detail-back-btn"),
   detailTitle: document.getElementById("detail-title"),
   detailList: document.getElementById("detail-list"),
+  detailHeaderActions: document.getElementById("detail-header-actions"),
+  detailPlayBtn: document.getElementById("detail-play-btn"),
+  detailShuffleBtn: document.getElementById("detail-shuffle-btn"),
 
   folderPickerOverlay: document.getElementById("folder-picker-overlay"),
   folderPickerHeading: document.getElementById("folder-picker-heading"),
@@ -113,6 +123,8 @@ const el = {
 
   upNextOverlay: document.getElementById("up-next-overlay"),
   upNextCloseBtn: document.getElementById("up-next-close-btn"),
+  upNextNowLabel: document.getElementById("up-next-now-label"),
+  upNextNowRow: document.getElementById("up-next-now-row"),
   upNextList: document.getElementById("up-next-list"),
 };
 
@@ -386,7 +398,7 @@ const NOTE_ICON = `<span class="row-icon">🎵</span>`;
 // `selectable` opts a row into the multi-select gesture — only the main
 // folder view's tracks pass this; Search results and a playlist's detail
 // list render the exact same rows they always have.
-function trackRow(track, { onPlay, onMenu, selectable = false }) {
+function trackRow(track, { onPlay, onMenu, selectable = false, reorderable = false }) {
   const row = document.createElement("div");
   const isPlaying = !!(queue[queueIndex] && queue[queueIndex].id === track.id);
   row.className = "row track-row" + (isPlaying ? " now-playing-row" : "");
@@ -403,6 +415,7 @@ function trackRow(track, { onPlay, onMenu, selectable = false }) {
       ${artist ? `<div class="row-sub">${escapeHtml(artist)}</div>` : ""}
     </div>
     <button class="row-menu-btn">⋮</button>
+    ${reorderable ? `<span class="drag-handle">☰</span>` : ""}
   `;
   if (selectable && selectedItems.has(key)) row.classList.add("selected");
 
@@ -412,7 +425,7 @@ function trackRow(track, { onPlay, onMenu, selectable = false }) {
   }) : () => false;
 
   row.addEventListener("click", (e) => {
-    if (e.target.closest(".row-menu-btn")) return;
+    if (e.target.closest(".row-menu-btn, .drag-handle")) return;
     if (wasLongPress()) return;
     if (selectable && selectMode) {
       toggleItemSelection("track", track.id, track.name, track, row);
@@ -647,6 +660,18 @@ async function rescanLibrary() {
 function openDetailList(title, tracks, playlistId) {
   el.detailTitle.textContent = title;
   el.detailList.innerHTML = "";
+  el.detailHeaderActions.classList.toggle("hidden", tracks.length === 0);
+  el.detailPlayBtn.onclick = () => {
+    setQueue(tracks, 0);
+    if (shuffleOn) toggleShuffle();
+    playCurrent();
+  };
+  el.detailShuffleBtn.onclick = () => {
+    const startIndex = Math.floor(Math.random() * tracks.length);
+    setQueue(tracks, startIndex);
+    if (!shuffleOn) toggleShuffle();
+    playCurrent();
+  };
   if (tracks.length === 0) {
     el.detailList.innerHTML = `<p class="status-msg">No songs${playlistId ? " in this playlist yet." : "."}</p>`;
   }
@@ -676,6 +701,79 @@ function openDetailList(title, tracks, playlistId) {
 }
 
 el.detailBackBtn.addEventListener("click", () => el.detailOverlay.classList.add("hidden"));
+
+// Drag-to-reorder the "Up Next" queue via each row's dedicated handle (never
+// the row itself, so it never fights with tap-to-play or the ⋮ menu). Rows
+// are swapped live in the DOM as the dragged row crosses a neighbor's
+// midpoint. Session-only — reorders playOrder in memory, nothing persisted.
+//
+// The compensation added to startClientY after a swap must match the
+// height of whichever row it just swapped with, NOT the dragged row's own
+// height — rows can differ in height (an artist subtitle line makes a row
+// taller), and using a single fixed height there was what caused the drag
+// to visibly desync/"resize" itself further with every swap.
+//
+// Move/end listeners live on window rather than using setPointerCapture on
+// the handle — the live DOM reorder below (insertBefore) relocates the
+// dragged row, and some WebViews silently release pointer capture when the
+// captured element (or an ancestor) gets reparented mid-gesture. Once that
+// happens pointerup never arrives, so the drag never "ends": the row is
+// left stuck with its in-progress transform, showing as a displaced/blank
+// row until the app is reloaded. window-level listeners don't depend on
+// capture surviving a reparent, so they keep receiving events regardless.
+function enableQueueDragReorder(container) {
+  container.querySelectorAll(".drag-handle").forEach((handle) => {
+    handle.addEventListener("pointerdown", (e) => {
+      const dragRow = handle.closest(".track-row");
+      const dragHeight = dragRow.getBoundingClientRect().height;
+      let startClientY = e.clientY;
+      dragRow.classList.add("dragging");
+
+      const onMove = (ev) => {
+        const dy = ev.clientY - startClientY;
+        dragRow.style.transform = `translateY(${dy}px)`;
+        const rows = Array.from(container.querySelectorAll(".track-row"));
+        const index = rows.indexOf(dragRow);
+        const dragMid = dragRow.getBoundingClientRect().top + dragHeight / 2;
+
+        if (dy < 0) {
+          const prev = rows[index - 1];
+          if (prev) {
+            const prevRect = prev.getBoundingClientRect();
+            if (dragMid < prevRect.top + prevRect.height / 2) {
+              container.insertBefore(dragRow, prev);
+              startClientY -= prevRect.height;
+            }
+          }
+        } else {
+          const next = rows[index + 1];
+          if (next) {
+            const nextRect = next.getBoundingClientRect();
+            if (dragMid > nextRect.top + nextRect.height / 2) {
+              container.insertBefore(dragRow, next.nextSibling);
+              startClientY += nextRect.height;
+            }
+          }
+        }
+      };
+
+      const onEnd = () => {
+        dragRow.style.transform = "";
+        dragRow.classList.remove("dragging");
+        const orderedIds = Array.from(container.querySelectorAll(".track-row")).map((row) => row.dataset.trackId);
+        const orderedQueueIndices = orderedIds.map((id) => queue.findIndex((t) => t.id === id));
+        setUpcomingOrder(orderedQueueIndices);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onEnd);
+        window.removeEventListener("pointercancel", onEnd);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onEnd);
+      window.addEventListener("pointercancel", onEnd);
+    });
+  });
+}
 
 // ---------- Folder picker (first-run onboarding + "change folder" from Settings) ----------
 let fpStack = [{ id: "root", name: "OneDrive" }];
@@ -1169,6 +1267,46 @@ el.restoreFileInput.addEventListener("change", () => {
   el.restoreFileInput.value = ""; // reset so selecting the same file again still fires "change"
 });
 
+// ---------- Error log (Settings > View error log) ----------
+function renderErrorLog() {
+  const log = loadErrorLog();
+  el.errorLogList.innerHTML = "";
+  if (log.length === 0) {
+    el.errorLogList.innerHTML = `<p class="status-msg">No errors logged.</p>`;
+    return;
+  }
+  log.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "error-log-row";
+    const time = new Date(entry.time).toLocaleString();
+    row.innerHTML = `
+      <div class="error-log-time">${escapeHtml(time)}</div>
+      <div class="error-log-message">${escapeHtml(entry.message)}</div>
+    `;
+    el.errorLogList.appendChild(row);
+  });
+}
+
+el.errorLogBtn.addEventListener("click", () => {
+  renderErrorLog();
+  el.errorLogOverlay.classList.remove("hidden");
+});
+el.errorLogBackBtn.addEventListener("click", () => el.errorLogOverlay.classList.add("hidden"));
+el.errorLogClearBtn.addEventListener("click", () => {
+  clearErrorLog();
+  renderErrorLog();
+});
+el.errorLogCopyBtn.addEventListener("click", async () => {
+  const log = loadErrorLog();
+  const text = log.map((entry) => `[${new Date(entry.time).toLocaleString()}] ${entry.message}`).join("\n\n");
+  try {
+    await navigator.clipboard.writeText(text || "No errors logged.");
+    showToast("Error log copied");
+  } catch {
+    showToast("Couldn't copy — clipboard unavailable");
+  }
+});
+
 // ---------- Player UI bindings ----------
 // Only tried once neither OneDrive's thumbnail nor the file's own embedded
 // picture panned out — a fixed delay rather than precisely sequencing two
@@ -1272,6 +1410,13 @@ player.onTrackChange = (item) => {
   el.fullTitle.textContent = title;
   el.fullArtist.textContent = artist;
   updateNowPlayingRows();
+  // Keeps the Up Next view honest if the track changes while it's already
+  // open (e.g. skipping via the lock-screen/notification controls) — without
+  // this, the overlay's DOM is left over from whenever it was last opened,
+  // so the newly-current track would still show up in the reorderable
+  // "Next up" list wearing the now-playing highlight instead of moving up
+  // into "Now Playing" where it belongs.
+  if (!el.upNextOverlay.classList.contains("hidden")) openUpNextView();
   // Cleared here, set in onRealTags below once the real embedded tag read
   // resolves for THIS track — lyrics matching prefers this over
   // item.audio.artist (see fetchLyricsResult), since that's the exact
@@ -1508,8 +1653,28 @@ el.addToPlaylistBtn.addEventListener("click", () => {
 // Jumps within the CURRENT queue/play order (via playIndex) rather than
 // replacing it with setQueue — tapping an upcoming track should just skip
 // ahead to it, not turn "what's next" into a brand new queue.
+function renderUpNextNowPlaying() {
+  const current = queue[queueIndex];
+  const hasCurrent = !!current;
+  el.upNextNowLabel.classList.toggle("hidden", !hasCurrent);
+  el.upNextNowRow.classList.toggle("hidden", !hasCurrent);
+  if (!hasCurrent) return;
+  const artist = current.audio && current.audio.artist;
+  el.upNextNowRow.innerHTML = `
+    <span class="row-lead">${EQUALIZER_ICON}</span>
+    <div class="row-text">
+      <div class="row-name">${escapeHtml(current.name.replace(/\.[^/.]+$/, ""))}</div>
+      ${artist ? `<div class="row-sub">${escapeHtml(artist)}</div>` : ""}
+    </div>
+  `;
+}
+
+// Jumps within the CURRENT queue/play order (via playIndex) rather than
+// replacing it with setQueue — tapping an upcoming track should just skip
+// ahead to it, not turn "what's next" into a brand new queue.
 function openUpNextView() {
-  const upcoming = getUpcomingTracks(30);
+  renderUpNextNowPlaying();
+  const upcoming = getUpcomingTracks(Infinity);
   el.upNextList.innerHTML = "";
   if (upcoming.length === 0) {
     const msg = repeatMode === "one" ? "Repeat is set to this song only." : "Nothing queued after this.";
@@ -1518,6 +1683,7 @@ function openUpNextView() {
   upcoming.forEach((track) => {
     el.upNextList.appendChild(
       trackRow(track, {
+        reorderable: upcoming.length > 1,
         onPlay: () => {
           const idx = queue.indexOf(track);
           el.upNextOverlay.classList.add("hidden");
@@ -1527,6 +1693,7 @@ function openUpNextView() {
       })
     );
   });
+  if (upcoming.length > 1) enableQueueDragReorder(el.upNextList);
   el.upNextOverlay.classList.remove("hidden");
 }
 el.upNextBtn.addEventListener("click", openUpNextView);

@@ -9,6 +9,11 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <link rel="stylesheet" href="css/style.css" />
+  <!-- Shaves the DNS+TLS handshake off the first Graph/auth request each
+       session — every folder listing and stream URL hits graph.microsoft.com,
+       and sign-in hits login.microsoftonline.com. -->
+  <link rel="preconnect" href="https://graph.microsoft.com" crossorigin />
+  <link rel="preconnect" href="https://login.microsoftonline.com" crossorigin />
   <script>
     // Applies the saved color theme before first paint — doing this in
     // app.js instead (loaded at the end of body) would show a flash of
@@ -95,10 +100,27 @@
         <button id="restore-btn" class="secondary-btn">Restore from file</button>
         <input id="restore-file-input" type="file" accept="application/json" class="hidden" />
         <hr />
+        <button id="error-log-btn" class="secondary-btn">🐞 View error log</button>
+        <hr />
         <button id="sign-out-btn" class="secondary-btn danger">Sign out</button>
         <hr />
         <p class="settings-hint">Version: <span id="app-version-label">—</span></p>
       </div>
+    </div>
+
+    <!-- Error log: shows what console.error/uncaught-exception messages
+         have piled up locally, so you can report an issue without needing
+         adb logcat hooked up to the phone. -->
+    <div id="error-log-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="error-log-back-btn" class="text-btn">‹ Back</button>
+        <h2>Error log</h2>
+        <div class="top-bar-actions">
+          <button id="error-log-copy-btn" class="icon-btn small" title="Copy log">📋</button>
+          <button id="error-log-clear-btn" class="icon-btn small" title="Clear log">🗑️</button>
+        </div>
+      </div>
+      <div id="error-log-list" class="file-list"></div>
     </div>
 
     <!-- Detail view: playlist tracks -->
@@ -106,6 +128,10 @@
       <div class="overlay-header">
         <button id="detail-back-btn" class="text-btn">‹ Back</button>
         <h2 id="detail-title">—</h2>
+        <div id="detail-header-actions" class="top-bar-actions hidden">
+          <button id="detail-play-btn" class="icon-btn small" title="Play all">▶️</button>
+          <button id="detail-shuffle-btn" class="icon-btn small" title="Shuffle play">🔀</button>
+        </div>
       </div>
       <div id="detail-list" class="file-list"></div>
     </div>
@@ -221,6 +247,9 @@
       <h2>Up Next</h2>
       <button id="up-next-close-btn" class="text-btn">Close</button>
     </div>
+    <div id="up-next-now-label" class="up-next-section-label">Now Playing</div>
+    <div id="up-next-now-row" class="row track-row now-playing-row up-next-now"></div>
+    <div class="up-next-section-label">Next up</div>
     <div id="up-next-list" class="file-list"></div>
   </div>
 
@@ -267,6 +296,7 @@
   <script src="js/vendor/capacitor-media-session.js"></script>
   <script src="js/vendor/capacitor-browser.js"></script>
   <script src="js/vendor/capacitor-app.js"></script>
+  <script src="js/errorlog.js"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/graph.js"></script>

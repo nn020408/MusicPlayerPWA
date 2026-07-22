@@ -365,10 +365,10 @@ function playPrevious() {
 // shuffle order is computed once by buildOrder), so this is just array
 // indexing with no network call and no measurable cost either way.
 function getUpcomingTracks(maxCount) {
-  if (repeatMode === "one") {
-    const current = queue[queueIndex];
-    return current ? [current] : [];
-  }
+  // Repeat-one plays only the current song again — there's nothing else
+  // "up next" to show, so this is deliberately empty rather than [current].
+  if (repeatMode === "one") return [];
+  const currentId = queue[queueIndex] && queue[queueIndex].id;
   const upcoming = [];
   const limit = Math.min(maxCount, playOrder.length - 1);
   let pos = orderPos;
@@ -378,9 +378,21 @@ function getUpcomingTracks(maxCount) {
       if (repeatMode === "all") pos = 0;
       else break;
     }
-    upcoming.push(queue[playOrder[pos]]);
+    const track = queue[playOrder[pos]];
+    // Position-based skip (starting past orderPos) already excludes the
+    // current track under normal play; this id check is the belt-and-
+    // suspenders guard for repeat-all wraparound landing back on it.
+    if (track && track.id !== currentId) upcoming.push(track);
   }
   return upcoming;
+}
+
+// Commits a drag-reorder of the "Up Next" list (app.js's enableQueueDragReorder)
+// — orderedQueueIndices is the new order for everything after the current
+// track. History (orderPos and anything before it) is left untouched.
+// Session-only, same as shuffle order itself: never persisted.
+function setUpcomingOrder(orderedQueueIndices) {
+  playOrder = playOrder.slice(0, orderPos + 1).concat(orderedQueueIndices);
 }
 
 function seekTo(seconds) {

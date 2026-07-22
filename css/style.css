@@ -274,6 +274,26 @@ button { font-family: inherit; }
 }
 .folder-row .row-name { flex: 1; }
 
+/* Drag-to-reorder handle (playlist detail view only). touch-action: none
+   stops the browser treating a vertical drag as page scroll so the pointer
+   events driving the reorder in app.js get every move uninterrupted. */
+.drag-handle {
+  color: var(--text-dim);
+  font-size: 18px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.track-row.dragging {
+  position: relative;
+  z-index: 5;
+  background: var(--surface);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  transition: none;
+}
+
 /* ---------- Multi-select (long-press a folder/track row, or tap ☑️) ---------- */
 .select-header-label { flex: 1; text-align: center; font-size: 15px; font-weight: 600; }
 .text-btn.accent { color: var(--accent); }
@@ -358,6 +378,18 @@ button { font-family: inherit; }
   font-size: 14px;
 }
 
+.error-log-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.error-log-time { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
+.error-log-message {
+  font-size: 13px;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .spinner {
   display: inline-block;
   width: 12px;
@@ -393,6 +425,18 @@ button { font-family: inherit; }
 /* Opened from within the full player (z-index 30), so it needs to sit above
    it — the shared .overlay base (20) alone isn't enough here. */
 #up-next-overlay { z-index: 32; }
+/* Now Playing shown separately, above the reorderable Next-up list — same
+   split Spotify/Apple Music use, so the currently-playing track is always
+   visible but never mixed in with (or draggable within) what's coming up. */
+.up-next-section-label {
+  padding: 12px 16px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.up-next-now { cursor: default; border-bottom: 1px solid var(--border); }
 .search-header { gap: 8px; }
 #search-input {
   flex: 1;
