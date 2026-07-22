@@ -64,6 +64,7 @@ const el = {
   toast: document.getElementById("toast"),
 
   nowPlayingBar: document.getElementById("now-playing-bar"),
+  npArt: document.querySelector(".np-art"),
   miniArt: document.getElementById("mini-art"),
   miniArtFallback: document.getElementById("mini-art-fallback"),
   nowPlayingTitle: document.getElementById("now-playing-title"),
@@ -107,6 +108,7 @@ const el = {
   playlistActionsTitle: document.getElementById("playlist-actions-title"),
   playlistRenameBtn: document.getElementById("playlist-rename-btn"),
   playlistDeleteBtn: document.getElementById("playlist-delete-btn"),
+  playlistClearBtn: document.getElementById("playlist-clear-btn"),
   playlistActionsCancelBtn: document.getElementById("playlist-actions-cancel-btn"),
 
   upNextOverlay: document.getElementById("up-next-overlay"),
@@ -497,8 +499,19 @@ async function openFolder(folderId, pushToStack, folderName) {
   renderBreadcrumb();
   el.statusMsg.innerHTML = `<span class="spinner"></span>Loading…`;
   el.fileList.innerHTML = "";
+  // Bad/spotty signal (as opposed to navigator.onLine going false) tends to
+  // fail an individual request rather than reliably — retry a few times with
+  // backoff instead of dead-ending on one attempt. isStillHere() guards
+  // against applying a stale retry's result after the user has since
+  // navigated to a different folder.
+  const isStillHere = () => folderStack[folderStack.length - 1]?.id === folderId;
   try {
-    const { folders, tracks } = await listFolder(folderId);
+    const { folders, tracks } = await retryWithBackoff(() => listFolder(folderId), {
+      onRetry: (attempt) => {
+        if (isStillHere()) el.statusMsg.innerHTML = `<span class="spinner"></span>Connection trouble — retrying (${attempt})…`;
+      },
+    });
+    if (!isStillHere()) return;
     currentTracks = tracks;
     currentFolders = folders;
     el.statusMsg.textContent = folders.length + tracks.length === 0 ? "This folder is empty." : "";
@@ -548,9 +561,20 @@ async function openFolder(folderId, pushToStack, folderName) {
         })
       );
     });
+
+    // Quietly warm each subfolder's own contents in the background (low
+    // priority, bounded concurrency — same pattern as the library scan) so
+    // that if you tap into one next, it's likely already cached instead of
+    // needing its own fresh network round trip. One level deep only — this
+    // is "prefetch what's visible right now", not a second library scan.
+    // Fire-and-forget: never awaited, and listFolder's own folderListCache
+    // already de-dupes this against anything the scan is doing in parallel.
+    runWithConcurrency(5, folders.map((f) => f.id), (id) =>
+      listFolder(id, { priority: "low" }).then(() => undefined).catch(() => undefined)
+    );
   } catch (err) {
     console.error(err);
-    el.statusMsg.textContent = "Couldn't load this folder. Check your connection and try again.";
+    if (isStillHere()) el.statusMsg.textContent = "Couldn't load this folder. Check your connection and try again.";
   }
 }
 
@@ -679,8 +703,16 @@ function renderFpBreadcrumb() {
 async function loadFpFolder(folderId) {
   renderFpBreadcrumb();
   el.fpFileList.innerHTML = `<p class="status-msg"><span class="spinner"></span>Loading…</p>`;
+  const isStillHere = () => fpStack[fpStack.length - 1]?.id === folderId;
   try {
-    const { folders, tracks } = await listFolder(folderId);
+    const { folders, tracks } = await retryWithBackoff(() => listFolder(folderId), {
+      onRetry: (attempt) => {
+        if (isStillHere()) {
+          el.fpFileList.innerHTML = `<p class="status-msg"><span class="spinner"></span>Connection trouble — retrying (${attempt})…</p>`;
+        }
+      },
+    });
+    if (!isStillHere()) return;
     el.fpFileList.innerHTML = "";
     if (folders.length === 0) {
       el.fpFileList.innerHTML = `<p class="status-msg">No subfolders here.</p>`;
@@ -699,7 +731,9 @@ async function loadFpFolder(folderId) {
     el.fpUseHereBtn.textContent = `✓ Use "${current.name}" (${tracks.length} song${tracks.length === 1 ? "" : "s"} here)`;
   } catch (err) {
     console.error(err);
-    el.fpFileList.innerHTML = `<p class="status-msg">Couldn't load this folder. Check your connection and try again.</p>`;
+    if (isStillHere()) {
+      el.fpFileList.innerHTML = `<p class="status-msg">Couldn't load this folder. Check your connection and try again.</p>`;
+    }
   }
 }
 
@@ -759,8 +793,9 @@ function renderPlaylistsList() {
   playlists.forEach((pl) => {
     const row = document.createElement("div");
     row.className = "row";
+    const icon = pl.id === FAVORITES_PLAYLIST_ID ? "❤️" : "📃";
     row.innerHTML = `
-      <span class="row-icon">📃</span>
+      <span class="row-icon">${icon}</span>
       <div class="row-text">
         <div class="row-name">${escapeHtml(pl.name)}</div>
         <div class="row-sub">${pl.tracks.length} song${pl.tracks.length === 1 ? "" : "s"}</div>
@@ -785,6 +820,12 @@ let pendingPlaylistForActions = null;
 function openPlaylistActionsModal(playlist) {
   pendingPlaylistForActions = playlist;
   el.playlistActionsTitle.textContent = playlist.name;
+  const isFavorites = playlist.id === FAVORITES_PLAYLIST_ID;
+  // Favorites is a fixed system playlist — no renaming, no deleting, only
+  // clearing it out.
+  el.playlistRenameBtn.classList.toggle("hidden", isFavorites);
+  el.playlistDeleteBtn.classList.toggle("hidden", isFavorites);
+  el.playlistClearBtn.classList.toggle("hidden", !isFavorites);
   el.playlistActionsModal.classList.remove("hidden");
 }
 
@@ -807,6 +848,16 @@ el.playlistDeleteBtn.addEventListener("click", () => {
   if (!playlist) return;
   if (confirm(`Delete playlist "${playlist.name}"?`)) {
     deletePlaylist(playlist.id);
+    renderPlaylistsList();
+  }
+});
+
+el.playlistClearBtn.addEventListener("click", () => {
+  el.playlistActionsModal.classList.add("hidden");
+  const playlist = pendingPlaylistForActions;
+  if (!playlist) return;
+  if (confirm(`Remove all songs from "${playlist.name}"? The playlist itself will stay, just empty.`)) {
+    clearPlaylist(playlist.id);
     renderPlaylistsList();
   }
 });
@@ -837,7 +888,8 @@ function openAddToPlaylistModal(trackOrTracks) {
   playlists.forEach((pl) => {
     const row = document.createElement("div");
     row.className = "row";
-    row.innerHTML = `<span class="row-icon">📃</span><span class="row-name">${escapeHtml(pl.name)}</span>`;
+    const icon = pl.id === FAVORITES_PLAYLIST_ID ? "❤️" : "📃";
+    row.innerHTML = `<span class="row-icon">${icon}</span><span class="row-name">${escapeHtml(pl.name)}</span>`;
     row.addEventListener("click", () => {
       const added = addTracksToPlaylist(pl.id, pendingTracksForPlaylist);
       el.addPlaylistModal.classList.add("hidden");
@@ -1139,17 +1191,8 @@ function applyRealArt(url) {
 // covers in a row.
 function scoreArtworkCandidate(candidate, wantTitle, wantArtist) {
   let score = 0;
-  const nWant = normalizeForCompare(wantTitle);
-  const nGot = normalizeForCompare(candidate.trackName);
-  if (nGot === nWant) score += 3;
-  else if (nWant && (nGot.includes(nWant) || nWant.includes(nGot))) score += 1.5;
-
-  const nWantArtist = normalizeForCompare(wantArtist);
-  const nGotArtist = normalizeForCompare(candidate.artistName);
-  if (nWantArtist) {
-    if (nGotArtist === nWantArtist) score += 3;
-    else if (nGotArtist.includes(nWantArtist) || nWantArtist.includes(nGotArtist)) score += 1.5;
-  }
+  score += fieldMatchScore(wantTitle, candidate.trackName, 3, 1.5);
+  score += fieldMatchScore(wantArtist, candidate.artistName, 3, 1.5);
   return score;
 }
 
@@ -1208,8 +1251,20 @@ async function tryOnlineArtFallback(item) {
   }
 }
 
+// Retriggers the CSS swap animation even on rapid consecutive track changes
+// (e.g. spamming next/previous) — same remove/reflow/re-add trick as
+// pulsePress(), since simply re-adding an already-present class wouldn't
+// restart a CSS animation.
+function pulseArtSwap(el) {
+  el.classList.remove("art-swap-in");
+  void el.offsetWidth;
+  el.classList.add("art-swap-in");
+}
+
 player.onTrackChange = (item) => {
   el.nowPlayingBar.classList.remove("hidden");
+  pulseArtSwap(el.npArt);
+  pulseArtSwap(el.fullPlayerArt);
   const title = item.name.replace(/\.[^/.]+$/, "");
   const artist = (item.audio && item.audio.artist) || "OneDrive";
   el.nowPlayingTitle.textContent = title;
@@ -1351,14 +1406,76 @@ el.miniNextBtn.addEventListener("click", (e) => {
   playNext();
 });
 el.fullPlayPauseBtn.addEventListener("click", playPause);
-el.fullNextBtn.addEventListener("click", () => {
-  pulsePress(el.fullNextBtn);
-  playNext();
-});
-el.fullPrevBtn.addEventListener("click", () => {
-  pulsePress(el.fullPrevBtn);
-  playPrevious();
-});
+
+// Hold-to-seek (full player only — the mini bar has no room/time context for
+// scrubbing feedback, same reasoning most players use). A quick tap still
+// just skips a track, matching before. While held past the threshold, it
+// scrubs instead. The actual seek is deliberately stepped (every
+// HOLD_SEEK_INTERVAL_MS) rather than continuous — tracks stream from a
+// remote URL here, not a local file, so a real seek re-buffers over the
+// network; committing on every animation frame would hammer that instead of
+// feeling smooth. Only wired up if the Pointer Events API exists (it does on
+// everything this app targets) — skipped harmlessly otherwise, falling back
+// to plain click-to-skip via the listener below.
+const HOLD_SEEK_THRESHOLD_MS = 450;
+const HOLD_SEEK_STEP_SECONDS = 3;
+const HOLD_SEEK_INTERVAL_MS = 300;
+
+function wireHoldToSeek(button, direction, tapAction) {
+  let holdTimer = null;
+  let seekInterval = null;
+  let isSeeking = false;
+
+  function beginHold() {
+    const duration = audioEl.duration;
+    if (!duration || !isFinite(duration)) return; // nothing loaded to scrub through
+    isSeeking = true;
+    button.classList.add("btn-holding");
+    seekInterval = setInterval(() => {
+      const next = Math.min(Math.max(audioEl.currentTime + direction * HOLD_SEEK_STEP_SECONDS, 0), audioEl.duration || 0);
+      seekTo(next);
+    }, HOLD_SEEK_INTERVAL_MS);
+  }
+
+  function endHold() {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+    clearInterval(seekInterval);
+    seekInterval = null;
+    if (!isSeeking) return false;
+    button.classList.remove("btn-holding");
+    isSeeking = false;
+    return true; // was a hold-seek, not a tap
+  }
+
+  button.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(beginHold, HOLD_SEEK_THRESHOLD_MS);
+  });
+  button.addEventListener("pointerup", () => {
+    if (!endHold()) {
+      pulsePress(button);
+      tapAction();
+    }
+  });
+  button.addEventListener("pointercancel", endHold);
+  button.addEventListener("pointerleave", endHold);
+}
+
+if (window.PointerEvent) {
+  wireHoldToSeek(el.fullNextBtn, 1, playNext);
+  wireHoldToSeek(el.fullPrevBtn, -1, playPrevious);
+} else {
+  el.fullNextBtn.addEventListener("click", () => {
+    pulsePress(el.fullNextBtn);
+    playNext();
+  });
+  el.fullPrevBtn.addEventListener("click", () => {
+    pulsePress(el.fullPrevBtn);
+    playPrevious();
+  });
+}
 el.fullSeekBar.addEventListener("input", () => {
   const duration = audioEl.duration || 0;
   if (duration > 0) seekTo((Number(el.fullSeekBar.value) / 1000) * duration);
@@ -1488,6 +1605,54 @@ function normalizeForCompare(s) {
   return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+// Plain Levenshtein edit distance — used so a real-world spelling variant
+// (an extra/missing/swapped letter — e.g. a band tagged "La Etnnia" vs a
+// file/query reading "La Etnia") still scores as a match. Substring
+// containment (below) already covers the *other* common case, an extra
+// qualifier word ("Los Inquietos" vs "Los Inquietos del Vallenato") — edit
+// distance alone scores that poorly since the lengths differ a lot, so both
+// checks are needed, not just one.
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j - 1], prev[j], curr[j - 1]);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+function similarity(a, b) {
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - levenshtein(a, b) / maxLen;
+}
+
+// Shared by title and artist comparisons in both scoreLyricsCandidate and
+// scoreArtworkCandidate: exact match, a clean substring relationship, or a
+// close spelling variant (>=85% similar) all count as a strong match;
+// anything moderately close (>=65%) counts as a partial one.
+function fieldMatchScore(want, got, exactPoints, partialPoints) {
+  if (!want) return 0;
+  const nWant = normalizeForCompare(want);
+  const nGot = normalizeForCompare(got);
+  if (!nGot) return 0;
+  if (nGot === nWant) return exactPoints;
+  // A one-character spelling variant on an otherwise-matching string is as
+  // trustworthy as an exact match — kept as its own check rather than folded
+  // into the substring one below, since it doesn't change the original
+  // exact-vs-partial weighting for the substring case.
+  if (similarity(nWant, nGot) >= 0.85) return exactPoints;
+  if (nGot.includes(nWant) || nWant.includes(nGot) || similarity(nWant, nGot) >= 0.65) return partialPoints;
+  return 0;
+}
+
 // Used only against /api/search results, which can return several loosely-
 // matched candidates (covers, live versions, other songs with a similar
 // title) — blindly trusting index 0 was a real source of wrong lyrics.
@@ -1496,17 +1661,8 @@ function normalizeForCompare(s) {
 // *something*.
 function scoreLyricsCandidate(candidate, wantTitle, wantArtist, wantDuration) {
   let score = 0;
-  const nWant = normalizeForCompare(wantTitle);
-  const nGot = normalizeForCompare(candidate.trackName);
-  if (nGot === nWant) score += 3;
-  else if (nWant && (nGot.includes(nWant) || nWant.includes(nGot))) score += 1.5;
-
-  if (wantArtist) {
-    const nWantArtist = normalizeForCompare(wantArtist);
-    const nGotArtist = normalizeForCompare(candidate.artistName);
-    if (nGotArtist === nWantArtist) score += 3;
-    else if (nGotArtist.includes(nWantArtist) || nWantArtist.includes(nGotArtist)) score += 1.5;
-  }
+  score += fieldMatchScore(wantTitle, candidate.trackName, 3, 1.5);
+  score += fieldMatchScore(wantArtist, candidate.artistName, 3, 1.5);
 
   if (wantDuration && candidate.duration) {
     const diff = Math.abs(candidate.duration - wantDuration);
@@ -1812,6 +1968,17 @@ attachSwipe(el.fullPlayer, {
   onSwipeDown: closeFullPlayer,
 });
 
+// Swiping the album art itself (not the whole screen) skips tracks — same
+// left/right convention as the mini-player bar above. Layering this on top
+// of the full-player's own swipe-down listener is safe: each attachSwipe
+// call tracks its own touch sequence independently, and a horizontal drag
+// never satisfies that listener's vertical-dominant condition, so there's no
+// double-handling of the same gesture.
+attachSwipe(el.fullPlayerArt, {
+  onSwipeLeft: playNext,
+  onSwipeRight: playPrevious,
+});
+
 // ---------- Android back button ----------
 // A PWA has no built-in back-stack, so without this the hardware/gesture
 // back button just exits the app immediately no matter what's open. This
@@ -2031,6 +2198,8 @@ el.signOutBtn.addEventListener("click", async () => {
   // — without this the app just silently sat on the (now signed-out) app screen.
   showLogin();
 });
+
+ensureFavoritesPlaylist(); // local-only, no auth needed — safe before sign-in even resolves
 
 (async function init() {
   const account = await initAuth();

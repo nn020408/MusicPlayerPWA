@@ -4,6 +4,27 @@
 
 const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 
+// Retries `attempt()` with exponential backoff instead of failing outright —
+// used for both folder listing and audio playback recovery, since a bad/spotty
+// signal (rather than a real "offline" state navigator.onLine would catch)
+// tends to make individual requests fail transiently rather than reliably.
+// Deliberately does NOT wait for the browser's "online" event as the retry
+// trigger — a phone reporting a connected-but-flaky signal never fires
+// "offline" in the first place, so plain timed backoff is what actually
+// recovers here.
+async function retryWithBackoff(attempt, { maxAttempts = 6, baseDelayMs = 2000, maxDelayMs = 20000, onRetry } = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (i === maxAttempts - 1) throw err;
+      const delay = Math.min(baseDelayMs * 2 ** i, maxDelayMs);
+      onRetry && onRetry(i + 1, delay, err);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 // Accepts either a relative Graph path ("/me/drive/...") or a full absolute
 // URL (used for @odata.nextLink pagination, which Graph returns as a full URL).
 async function graphGet(pathOrUrl, { priority } = {}) {

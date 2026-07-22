@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- Matches the app's actual brand colors (icons/icon.svg, manifest.json)
+         rather than Capacitor's generic blue default template. -->
+    <color name="colorPrimary">#1db954</color>
+    <color name="colorPrimaryDark">#121212</color>
+    <color name="colorAccent">#1db954</color>
+</resources>

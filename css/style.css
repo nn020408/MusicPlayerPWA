@@ -169,6 +169,16 @@ button { font-family: inherit; }
 }
 .btn-pressed { animation: btn-press 220ms ease-out; }
 
+/* Sustained state while held past the long-press threshold (see
+   wireHoldToSeek in app.js) — deliberately distinct from .btn-pressed's
+   one-shot bounce, since this needs to visibly persist for the whole hold,
+   not just flash once. */
+@keyframes btn-hold-pulse {
+  0%, 100% { transform: scale(0.86); }
+  50% { transform: scale(0.95); }
+}
+.btn-holding { color: var(--accent); animation: btn-hold-pulse 0.6s ease-in-out infinite; }
+
 .text-btn {
   background: none;
   border: none;
@@ -268,18 +278,20 @@ button { font-family: inherit; }
 .select-header-label { flex: 1; text-align: center; font-size: 15px; font-weight: 600; }
 .text-btn.accent { color: var(--accent); }
 
-/* Fixed-size slot so the icon <-> checkbox swap never reflows row text. */
-.row-lead { position: relative; width: 20px; height: 20px; flex-shrink: 0; }
-.row-lead .row-icon,
+/* The folder/song icon stays visible at all times — in select mode the
+   checkbox slides in *alongside* it (not a swap/replace) so it's still
+   obvious which rows are folders vs. songs while multi-selecting. */
+.row-lead { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Checkbox first (leftmost), icon after — flex `order` rather than touching
+   the HTML, since this markup is repeated across a few row templates. */
+.row-lead .select-check { order: 1; }
+.row-lead .row-icon { order: 2; font-size: 20px; width: 20px; text-align: center; flex-shrink: 0; }
 .row-lead .select-check {
-  position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  width: 0; opacity: 0; transform: scale(0.55); pointer-events: none; overflow: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease, width 0.15s ease;
 }
-.row-lead .row-icon { font-size: 20px; }
-.row-lead .select-check { opacity: 0; transform: scale(0.55); pointer-events: none; }
-.file-list.select-mode .row-lead .row-icon { opacity: 0; transform: scale(0.55); }
-.file-list.select-mode .row-lead .select-check { opacity: 1; transform: scale(1); pointer-events: auto; }
+.file-list.select-mode .row-lead .select-check { width: 20px; opacity: 1; transform: scale(1); pointer-events: auto; }
 
 .select-check .circle {
   width: 20px; height: 20px; border-radius: 50%;
@@ -546,8 +558,17 @@ button { font-family: inherit; }
   letter-spacing: 0.05em;
   pointer-events: none;
 }
-.full-player-header-actions { display: flex; align-items: center; gap: 2px; }
 .icon-svg { width: 22px; height: 22px; display: block; }
+
+/* Track-change transition — transform/opacity only, so this is a compositor-
+   only animation (no layout/paint cost per frame), triggered once per track
+   change rather than continuously. See pulseArtSwap() in app.js. */
+@keyframes art-swap {
+  0% { opacity: 0; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.art-swap-in { animation: art-swap 260ms ease-out; }
+
 .full-player-art {
   flex: 1;
   display: flex;
@@ -610,6 +631,15 @@ button { font-family: inherit; }
 .full-player-meta { text-align: center; margin-top: 24px; }
 .full-player-meta h2 { font-size: 22px; margin: 0 0 4px; }
 .full-player-meta p { margin: 0; color: var(--text-dim); }
+
+/* Spread left/center/right across the full width (Samsung Music's
+   queue/favorite/add row) — not clustered/left-aligned like a header. */
+.full-player-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+}
 
 .full-player-seek { margin-top: 24px; }
 #full-seek-bar { width: 100%; accent-color: var(--accent); }

@@ -414,23 +414,42 @@ function resetPlayer() {
   blobPrefetch = null;
 }
 
-// If a downloadUrl (valid ~1hr) expired mid-playback, refetch it and resume
-// from the same position instead of just failing.
+// Recovers from two distinct causes the same way (refetch a fresh stream URL,
+// seek back to where we were, resume): a downloadUrl (valid ~1hr) expiring
+// mid-playback, and a genuine network drop/bad signal — MEDIA_ERR_NETWORK.
+// Retried with backoff rather than once, since a flaky signal (as opposed to
+// navigator.onLine actually going false) usually needs a few attempts spread
+// over time to ride out, not just one immediate retry.
 audioEl.addEventListener("error", async () => {
   const item = queue[queueIndex];
   if (!item) return;
   const elapsedMs = Date.now() - playStartedAt;
-  if (elapsedMs > 50 * 60 * 1000) {
-    const resumeAt = audioEl.currentTime;
+  const isNetworkError = audioEl.error && audioEl.error.code === 2; // MediaError.MEDIA_ERR_NETWORK
+  const resumeAt = audioEl.currentTime;
+
+  if (elapsedMs > 50 * 60 * 1000 || isNetworkError) {
     try {
-      const freshUrl = await refreshDownloadUrl(item.id);
-      audioEl.src = freshUrl;
-      audioEl.currentTime = resumeAt;
-      playStartedAt = Date.now();
-      await audioEl.play();
+      await retryWithBackoff(
+        async () => {
+          if (queue[queueIndex] !== item) return; // track changed mid-retry — nothing left to do
+          const freshUrl = await refreshDownloadUrl(item.id);
+          audioEl.src = freshUrl;
+          audioEl.currentTime = resumeAt;
+          playStartedAt = Date.now();
+          await audioEl.play();
+        },
+        {
+          maxAttempts: 8,
+          maxDelayMs: 30000,
+          onRetry: (attempt) => {
+            player.onStatus && player.onStatus(`Connection trouble — retrying "${item.name}" (${attempt})…`);
+          },
+        }
+      );
+      if (queue[queueIndex] === item) player.onStatus && player.onStatus("");
     } catch (err) {
-      console.error("Failed to refresh expired stream URL", err);
-      player.onStatus && player.onStatus(`Stream link expired and refresh failed: ${err.message || err}`);
+      console.error("Failed to recover playback after repeated retries", err);
+      player.onStatus && player.onStatus(`Couldn't reconnect to play "${item.name}": ${err.message || err}`);
     }
   } else {
     const name = MEDIA_ERROR_NAMES[audioEl.error && audioEl.error.code] || "unknown error";
