@@ -253,6 +253,15 @@ button { font-family: inherit; }
   border-radius: 1px;
   animation: eq-bounce 0.9s ease-in-out infinite;
 }
+/* body.audio-paused is toggled by player.onPlayStateChange (app.js) — a
+   plain animation-play-state: paused would freeze each bar wherever it
+   happened to be mid-bounce (messy, looks broken); turning the animation
+   off entirely and setting a fixed height gives a clean static "paused
+   equalizer" look instead, even though the row stays marked as current. */
+body.audio-paused .row-icon.playing .bar {
+  animation: none;
+  height: 10px;
+}
 .row-icon.playing .bar:nth-child(1) { animation-delay: 0s; }
 .row-icon.playing .bar:nth-child(2) { animation-delay: 0.2s; }
 .row-icon.playing .bar:nth-child(3) { animation-delay: 0.4s; }
@@ -447,7 +456,7 @@ button { font-family: inherit; }
   color: var(--text);
   font-size: 15px;
 }
-#search-results, #detail-list, #playlists-list {
+#search-results, #detail-list, #playlists-list, #up-next-list, #error-log-list {
   flex: 1;
   overflow-y: auto;
   padding-bottom: 90px; /* clears the floating mini-player when it's showing */

@@ -24,6 +24,7 @@ let repeatMode = "off"; // "off" | "all" | "one"
 let playStartedAt = 0; // ms timestamp, used to guess when a downloadUrl may have expired
 let currentArtBlobUrl = null; // tracks the last embedded-art blob URL so we can revoke it
 let currentBlobUrl = null; // tracks the audio object URL backing audioEl.src (if any), so we can revoke it once we move off it
+let loadedTrackId = null; // id of the track audioEl.src actually corresponds to right now — see playPause()
 
 // Streaming URLs for the *next* track are fetched ahead of time (while the
 // current one is still playing, screen presumably on) so that advancing to
@@ -216,6 +217,7 @@ function cycleRepeat() {
 async function playCurrent() {
   const item = queue[queueIndex];
   if (!item) return;
+  const isStillCurrent = () => queue[queueIndex] === item;
 
   // Only apply a restored position if we're playing the exact track it was
   // saved for — tapping next/previous or a different song before ever
@@ -239,32 +241,65 @@ async function playCurrent() {
 
   try {
     player.onStatus && player.onStatus(`Loading "${item.name}"…`);
-    let url = prefetchedBlobUrls.get(item.id);
-    let usedBlobUrl = url || null;
-    if (url) {
-      prefetchedBlobUrls.delete(item.id);
-    } else {
-      url = prefetchedUrls.get(item.id);
-      if (url) {
-        prefetchedUrls.delete(item.id);
-      } else {
-        url = await getDownloadUrl(item);
+
+    // A prefetched URL/blob only gets used on the very first attempt — if
+    // actually playing it fails, that prefetch is exactly as suspect as a
+    // fresh fetch would be (both need live network to stream), so every
+    // retry after that always asks OneDrive for a genuinely new one.
+    let attemptNumber = 0;
+    let id3Promise = null;
+    await retryWithBackoff(
+      async () => {
+        if (!isStillCurrent()) return;
+        let url = null;
+        let usedBlobUrl = null;
+        if (attemptNumber === 0) {
+          url = prefetchedBlobUrls.get(item.id);
+          if (url) {
+            usedBlobUrl = url;
+            prefetchedBlobUrls.delete(item.id);
+          } else {
+            url = prefetchedUrls.get(item.id);
+            if (url) prefetchedUrls.delete(item.id);
+          }
+        }
+        attemptNumber++;
+        if (!url) url = await getDownloadUrl(item);
+        if (!isStillCurrent()) return;
+        if (!url) throw new Error("No download URL returned by OneDrive for this file");
+
+        audioEl.src = url;
+        loadedTrackId = item.id;
+        // Safe to revoke now — audioEl.src was reassigned above, so nothing
+        // still references the previous blob (if any).
+        if (currentBlobUrl && currentBlobUrl !== usedBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+        currentBlobUrl = usedBlobUrl;
+        playStartedAt = Date.now();
+
+        // Kick off the real-tag read (including embedded cover art) as soon
+        // as we have the URL, in parallel with playback starting — only for
+        // this one track, never for list rows. Not awaited here so it
+        // doesn't delay playback.
+        id3Promise = readId3Tags(url);
+
+        // This is the actual step that was never retried before — a
+        // prefetched URL fetched successfully while you still had signal
+        // doesn't mean streaming it will succeed once you don't. .play()
+        // rejecting here (e.g. Chrome's "Failed to load because no
+        // supported source was found") is what auto-advancing to the next
+        // track while offline actually hits, since that track's URL is
+        // usually already prefetched from before the connection dropped.
+        await audioEl.play();
+      },
+      {
+        maxAttempts: 8,
+        maxDelayMs: 30000,
+        onRetry: (attempt) => {
+          if (isStillCurrent()) player.onStatus && player.onStatus(`Connection trouble — retrying "${item.name}" (${attempt})…`);
+        },
       }
-    }
-    if (!url) throw new Error("No download URL returned by OneDrive for this file");
-    audioEl.src = url;
-    // Safe to revoke now — audioEl.src was reassigned above, so nothing
-    // still references the previous blob (if any).
-    if (currentBlobUrl && currentBlobUrl !== usedBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-    currentBlobUrl = usedBlobUrl;
-    playStartedAt = Date.now();
-
-    // Kick off the real-tag read (including embedded cover art) as soon as we
-    // have the URL, in parallel with playback starting — only for this one
-    // track, never for list rows. Not awaited here so it doesn't delay playback.
-    const id3Promise = readId3Tags(url);
-
-    await audioEl.play();
+    );
+    if (!isStillCurrent()) return; // you skipped to something else while this was retrying
     if (resumeAt > 0) audioEl.currentTime = resumeAt;
     player.onStatus && player.onStatus("");
     updateMediaSessionMetadata(item);
@@ -323,12 +358,28 @@ async function playIndex(index) {
   await playCurrent();
 }
 
+// Resumes playback, recovering a stuck/stale audioEl first if needed —
+// loadedTrackId not matching the current queue item means audioEl doesn't
+// actually hold the track we think should be playing (e.g. a skip attempted
+// while offline never got past fetching the URL, or every retry above
+// already gave up). Calling .play() on whatever's stale in there is a
+// silent no-op either way; reloading via playCurrent() is the only thing
+// that can actually recover it.
+function resumePlayback() {
+  const current = queue[queueIndex];
+  if (current && loadedTrackId !== current.id) {
+    playCurrent();
+    return;
+  }
+  audioEl.play();
+}
+
 function playPause() {
   if (hasPendingResume) {
     playCurrent(); // nothing loaded yet after a restore — actually start playback
     return;
   }
-  if (audioEl.paused) audioEl.play();
+  if (audioEl.paused) resumePlayback();
   else audioEl.pause();
 }
 
@@ -411,6 +462,7 @@ function resetPlayer() {
   queueIndex = -1;
   playOrder = [];
   orderPos = -1;
+  loadedTrackId = null;
   hasPendingResume = false;
   pendingResumeIndex = -1;
   pendingResumePosition = 0;
@@ -436,7 +488,14 @@ audioEl.addEventListener("error", async () => {
   const item = queue[queueIndex];
   if (!item) return;
   const elapsedMs = Date.now() - playStartedAt;
-  const isNetworkError = audioEl.error && audioEl.error.code === 2; // MediaError.MEDIA_ERR_NETWORK
+  // MEDIA_ERR_NETWORK (2) is the "expected" code for this, but a total loss
+  // of connectivity (airplane mode, not just a flaky signal) often gets
+  // reported as MEDIA_ERR_SRC_NOT_SUPPORTED (4) instead — the browser can't
+  // tell "genuinely bad file" from "couldn't even check because there's no
+  // network," and defaults to the more generic error. Since these URLs are
+  // always valid Graph-issued links (the format never actually changes
+  // between plays), a code-4 error here is safe to treat as retryable too.
+  const isNetworkError = audioEl.error && (audioEl.error.code === 2 || audioEl.error.code === 4);
   const resumeAt = audioEl.currentTime;
 
   if (elapsedMs > 50 * 60 * 1000 || isNetworkError) {
@@ -462,17 +521,55 @@ audioEl.addEventListener("error", async () => {
     } catch (err) {
       console.error("Failed to recover playback after repeated retries", err);
       player.onStatus && player.onStatus(`Couldn't reconnect to play "${item.name}": ${err.message || err}`);
+      // Marks audioEl as no longer trustworthy for this track — resumePlayback()
+      // checks this and will reload from scratch via playCurrent() instead of
+      // silently no-op'ing on the still-broken element next time Play is pressed.
+      if (queue[queueIndex] === item) loadedTrackId = null;
     }
   } else {
     const name = MEDIA_ERROR_NAMES[audioEl.error && audioEl.error.code] || "unknown error";
     console.error("Audio element error", audioEl.error);
     player.onStatus && player.onStatus(`Playback error (${name}) for "${item.name}"`);
+    if (queue[queueIndex] === item) loadedTrackId = null;
   }
 });
+
+// Without this, a Bluetooth car head unit (AVRCP) or lock-screen widget has
+// no way to know the track's duration/position — playbackState alone only
+// says playing-vs-paused, not where in the song you are, so those displays
+// either show a frozen 0:00 or don't update at all. Web MediaSession and the
+// native plugin each have their own setPositionState; called on every
+// timeupdate tick (~4x/sec) plus at play/pause/seek so the anchor is always
+// fresh, matching what Chrome/Android actually use to interpolate the
+// running clock between updates.
+function updatePositionState() {
+  if (!audioEl.duration || !isFinite(audioEl.duration)) return;
+  const state = {
+    duration: audioEl.duration,
+    // audioEl.playbackRate is the speed multiplier for WHEN it's playing —
+    // it stays 1 even while genuinely paused, since pausing doesn't change
+    // that property. Passing it unconditionally is what caused the
+    // notification/car display to keep extrapolating time forward while
+    // paused or stopped: the OS was being told "position is still advancing
+    // at 1x" regardless of actual state. 0 here means "not advancing."
+    playbackRate: audioEl.paused ? 0 : audioEl.playbackRate || 1,
+    position: Math.min(audioEl.currentTime, audioEl.duration),
+  };
+  if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
+    try {
+      navigator.mediaSession.setPositionState(state);
+    } catch {
+      // Throws if position is transiently out of range (e.g. mid-src-swap) — harmless.
+    }
+  }
+  const native = nativeMediaSession();
+  if (native) native.setPositionState(state);
+}
 
 audioEl.addEventListener("play", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: "playing" });
+  updatePositionState();
   player.onPlayStateChange && player.onPlayStateChange(true);
 });
 audioEl.addEventListener("pause", () => {
@@ -483,9 +580,11 @@ audioEl.addEventListener("pause", () => {
   // plugin's default "only during playback" mode would; it only updates the
   // notification's play/pause icon.
   nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: "paused" });
+  updatePositionState();
   player.onPlayStateChange && player.onPlayStateChange(false);
   savePlaybackState();
 });
+audioEl.addEventListener("seeked", updatePositionState);
 audioEl.addEventListener("ended", () => {
   if (repeatMode === "one") {
     audioEl.currentTime = 0;
@@ -496,6 +595,7 @@ audioEl.addEventListener("ended", () => {
 });
 audioEl.addEventListener("timeupdate", () => {
   player.onTimeUpdate && player.onTimeUpdate(audioEl.currentTime, audioEl.duration || 0);
+  updatePositionState();
   // Throttled periodic save so an abrupt kill (not a clean pause) still
   // leaves a reasonably fresh resume position, without writing on every tick.
   const now = Date.now();
@@ -516,9 +616,14 @@ function updateMediaSessionMetadata(item) {
   const artist = (item.audio && item.audio.artist) || "OneDrive";
   const album = (item.audio && item.audio.album) || "";
 
+  // "play" goes through resumePlayback() rather than audioEl.play() directly
+  // — that's what checks loadedTrackId and reloads via playCurrent() if the
+  // element is stale/broken (e.g. a skip attempted while offline never
+  // actually got loaded), so pressing Play from the lock screen/notification
+  // after reconnecting can recover a stuck track too, not just the in-app button.
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album });
-    navigator.mediaSession.setActionHandler("play", () => audioEl.play());
+    navigator.mediaSession.setActionHandler("play", resumePlayback);
     navigator.mediaSession.setActionHandler("pause", () => audioEl.pause());
     navigator.mediaSession.setActionHandler("previoustrack", playPrevious);
     navigator.mediaSession.setActionHandler("nexttrack", playNext);
@@ -530,7 +635,7 @@ function updateMediaSessionMetadata(item) {
   const native = nativeMediaSession();
   if (native) {
     native.setMetadata({ title, artist, album, artwork: [] });
-    native.setActionHandler({ action: "play" }, () => audioEl.play());
+    native.setActionHandler({ action: "play" }, resumePlayback);
     native.setActionHandler({ action: "pause" }, () => audioEl.pause());
     native.setActionHandler({ action: "previoustrack" }, playPrevious);
     native.setActionHandler({ action: "nexttrack" }, playNext);

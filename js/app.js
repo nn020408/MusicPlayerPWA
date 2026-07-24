@@ -146,16 +146,29 @@ function escapeHtml(str) {
 
 let toastHideTimer = null;
 let toastRemoveTimer = null;
+// duration: null means persistent — stays up until hideToast() is called or
+// another showToast() replaces it. Used for "still retrying…" messages,
+// which must not vanish on their own timer partway through a multi-minute
+// reconnect attempt — that reads as "gave up" even when it's still working.
 function showToast(message, duration = 2500) {
   clearTimeout(toastHideTimer);
   clearTimeout(toastRemoveTimer);
   el.toast.textContent = message;
   el.toast.classList.remove("hidden");
   requestAnimationFrame(() => el.toast.classList.add("show"));
-  toastHideTimer = setTimeout(() => {
-    el.toast.classList.remove("show");
-    toastRemoveTimer = setTimeout(() => el.toast.classList.add("hidden"), 200);
-  }, duration);
+  if (duration != null) {
+    toastHideTimer = setTimeout(() => {
+      el.toast.classList.remove("show");
+      toastRemoveTimer = setTimeout(() => el.toast.classList.add("hidden"), 200);
+    }, duration);
+  }
+}
+
+function hideToast() {
+  clearTimeout(toastHideTimer);
+  clearTimeout(toastRemoveTimer);
+  el.toast.classList.remove("show");
+  toastRemoveTimer = setTimeout(() => el.toast.classList.add("hidden"), 200);
 }
 
 // ---------- Colorful placeholder art for songs with no cover art ----------
@@ -488,7 +501,11 @@ function renderBreadcrumb() {
 async function collectTracksRecursive(folderId) {
   const tracks = [];
   await runWithConcurrency(5, [folderId], async (id) => {
-    const { folders, tracks: folderTracks } = await listFolder(id);
+    // Retried the same as every other folder listing in the app — without
+    // this, one flaky request anywhere in a wide folder tree would abort the
+    // whole "play this folder" / "add to playlist" action outright instead
+    // of just riding out the blip.
+    const { folders, tracks: folderTracks } = await retryWithBackoff(() => listFolder(id));
     tracks.push(...folderTracks);
     return folders.map((f) => f.id);
   });
@@ -1475,6 +1492,34 @@ player.onPlayStateChange = (isPlaying) => {
   const symbol = isPlaying ? "⏸" : "▶";
   el.miniPlayPauseBtn.textContent = symbol;
   el.fullPlayPauseBtn.textContent = symbol;
+  // Drives the equalizer-bar animation (CSS) on every "now playing" row
+  // anywhere in the DOM at once — a single toggle here instead of hunting
+  // down and re-rendering each row individually whenever play/pause changes.
+  document.body.classList.toggle("audio-paused", !isPlaying);
+};
+
+// Toast rather than el.statusMsg (used below to be reserved for folder-load
+// state) — el.statusMsg lives in the base view, underneath every overlay
+// (Full Player included), so it's invisible during actual playback, which is
+// exactly when this message matters. Toast is position:fixed above
+// everything, so it's visible no matter what screen you're looking at.
+// "Loading …" fires on every single track change (including normal
+// skip/auto-advance, which is instant almost always) — toasting that too
+// would pop up on every song. Only retry/error messages are worth
+// interrupting for; routine loading has no toast at all.
+//
+// Persistent (no auto-hide) rather than a timed toast — a reconnect can take
+// up to ~2 minutes across several retries, and a message that vanishes on
+// its own 4-second timer partway through reads as "gave up" even though
+// it's still actively retrying. It only goes away once onStatus("") fires
+// (real success) or a new message replaces it.
+player.onStatus = (message) => {
+  if (!message) {
+    hideToast();
+    return;
+  }
+  if (message.startsWith("Loading")) return;
+  showToast(message, null);
 };
 
 player.onTimeUpdate = (current, duration) => {
@@ -1482,14 +1527,6 @@ player.onTimeUpdate = (current, duration) => {
   el.fullDuration.textContent = formatTime(duration);
   if (duration > 0) el.fullSeekBar.value = String((current / duration) * 1000);
   if (lyricsViewActive) updateActiveLyricsLine(current);
-};
-
-player.onStatus = (msg) => {
-  if (msg && msg.startsWith("Loading")) {
-    el.statusMsg.innerHTML = `<span class="spinner"></span>${escapeHtml(msg)}`;
-  } else {
-    el.statusMsg.textContent = msg;
-  }
 };
 
 player.onShuffleRepeatChange = (shuffle, repeat) => {

@@ -127,7 +127,15 @@ async function scanLibrary(onProgress) {
   let foldersScanned = 0;
 
   async function handleFolder(folderId) {
-    const { folders, tracks: folderTracks } = await listFolder(folderId, { priority: "low" });
+    // Retried the same as every other folder listing in the app — a
+    // multi-minute full-library scan is exactly where a single flaky
+    // request used to be most costly: without this, one blip anywhere in
+    // the tree aborted the entire scan instead of just riding it out.
+    const { folders, tracks: folderTracks } = await retryWithBackoff(() => listFolder(folderId, { priority: "low" }), {
+      onRetry: (attempt) => {
+        onProgress && onProgress(foldersScanned, tracks.length, `connection trouble — retrying (${attempt})…`);
+      },
+    });
     tracks.push(...folderTracks.map(slimTrack));
     foldersScanned++;
     onProgress && onProgress(foldersScanned, tracks.length);
