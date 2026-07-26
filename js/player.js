@@ -25,6 +25,15 @@ let playStartedAt = 0; // ms timestamp, used to guess when a downloadUrl may hav
 let currentArtBlobUrl = null; // tracks the last embedded-art blob URL so we can revoke it
 let currentBlobUrl = null; // tracks the audio object URL backing audioEl.src (if any), so we can revoke it once we move off it
 let loadedTrackId = null; // id of the track audioEl.src actually corresponds to right now — see playPause()
+// Bumped on every playCurrent() call, regardless of which track it's for.
+// Comparing queue[queueIndex] === item alone breaks under Next/Previous
+// ping-pong during a network retry: going B -> A -> B while B's original
+// retry is still in flight makes that stale attempt's item reference match
+// again, so it can win a race against the fresh attempt and land the wrong
+// track's audio/metadata. A monotonically increasing token makes every
+// playCurrent() call unambiguous regardless of whether the track it's for
+// happens to repeat.
+let playGeneration = 0;
 
 // Streaming URLs for the *next* track are fetched ahead of time (while the
 // current one is still playing, screen presumably on) so that advancing to
@@ -217,7 +226,8 @@ function cycleRepeat() {
 async function playCurrent() {
   const item = queue[queueIndex];
   if (!item) return;
-  const isStillCurrent = () => queue[queueIndex] === item;
+  const myGeneration = ++playGeneration;
+  const isStillCurrent = () => playGeneration === myGeneration;
 
   // Only apply a restored position if we're playing the exact track it was
   // saved for — tapping next/previous or a different song before ever
@@ -487,6 +497,11 @@ function resetPlayer() {
 audioEl.addEventListener("error", async () => {
   const item = queue[queueIndex];
   if (!item) return;
+  // Same generation token playCurrent() uses — an item-reference check
+  // alone would wrongly consider this recovery "still relevant" if you
+  // navigate away and back to this exact track while it's retrying.
+  const myGeneration = ++playGeneration;
+  const isStillCurrent = () => playGeneration === myGeneration;
   const elapsedMs = Date.now() - playStartedAt;
   // MEDIA_ERR_NETWORK (2) is the "expected" code for this, but a total loss
   // of connectivity (airplane mode, not just a flaky signal) often gets
@@ -502,8 +517,9 @@ audioEl.addEventListener("error", async () => {
     try {
       await retryWithBackoff(
         async () => {
-          if (queue[queueIndex] !== item) return; // track changed mid-retry — nothing left to do
+          if (!isStillCurrent()) return; // superseded by a newer playCurrent()/recovery — nothing left to do
           const freshUrl = await refreshDownloadUrl(item.id);
+          if (!isStillCurrent()) return;
           audioEl.src = freshUrl;
           audioEl.currentTime = resumeAt;
           playStartedAt = Date.now();
@@ -513,24 +529,28 @@ audioEl.addEventListener("error", async () => {
           maxAttempts: 8,
           maxDelayMs: 30000,
           onRetry: (attempt) => {
-            player.onStatus && player.onStatus(`Connection trouble — retrying "${item.name}" (${attempt})…`);
+            if (isStillCurrent()) player.onStatus && player.onStatus(`Connection trouble — retrying "${item.name}" (${attempt})…`);
           },
         }
       );
-      if (queue[queueIndex] === item) player.onStatus && player.onStatus("");
+      if (isStillCurrent()) player.onStatus && player.onStatus("");
     } catch (err) {
       console.error("Failed to recover playback after repeated retries", err);
-      player.onStatus && player.onStatus(`Couldn't reconnect to play "${item.name}": ${err.message || err}`);
-      // Marks audioEl as no longer trustworthy for this track — resumePlayback()
-      // checks this and will reload from scratch via playCurrent() instead of
-      // silently no-op'ing on the still-broken element next time Play is pressed.
-      if (queue[queueIndex] === item) loadedTrackId = null;
+      if (isStillCurrent()) {
+        player.onStatus && player.onStatus(`Couldn't reconnect to play "${item.name}": ${err.message || err}`);
+        // Marks audioEl as no longer trustworthy for this track — resumePlayback()
+        // checks this and will reload from scratch via playCurrent() instead of
+        // silently no-op'ing on the still-broken element next time Play is pressed.
+        loadedTrackId = null;
+      }
     }
   } else {
     const name = MEDIA_ERROR_NAMES[audioEl.error && audioEl.error.code] || "unknown error";
     console.error("Audio element error", audioEl.error);
-    player.onStatus && player.onStatus(`Playback error (${name}) for "${item.name}"`);
-    if (queue[queueIndex] === item) loadedTrackId = null;
+    if (isStillCurrent()) {
+      player.onStatus && player.onStatus(`Playback error (${name}) for "${item.name}"`);
+      loadedTrackId = null;
+    }
   }
 });
 

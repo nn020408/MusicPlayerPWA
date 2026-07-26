@@ -1770,12 +1770,20 @@ function waitForRealTags(timeoutMs) {
 function parseSyncedLyrics(lrc) {
   const lines = [];
   const timeTag = /\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\]/g;
+  // Some LRC files carry an [offset:+/-ms] metadata tag to correct for the
+  // specific rip/encode they were timed against — silently ignoring this
+  // was a real source of "lyrics don't quite match the position" reports,
+  // not just crowd-sourced timestamp inaccuracy. Per the (informal) LRC
+  // convention, a positive offset means the tag times run late, so it's
+  // subtracted to land on the actual audio position.
+  const offsetMatch = lrc.match(/\[offset:\s*([+-]?\d+)\]/i);
+  const offsetSeconds = offsetMatch ? parseInt(offsetMatch[1], 10) / 1000 : 0;
   lrc.split("\n").forEach((line) => {
     const matches = [...line.matchAll(timeTag)];
     if (!matches.length) return;
     const text = line.replace(timeTag, "").trim();
     matches.forEach((m) => {
-      lines.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text });
+      lines.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]) - offsetSeconds, text });
     });
   });
   return lines.sort((a, b) => a.time - b.time);
@@ -2324,6 +2332,13 @@ function showApp() {
 
   const restoredItem = restorePlaybackState();
   if (restoredItem) showRestoredTrackDisplay(restoredItem);
+  // restorePlaybackState() restores shuffleOn/repeatMode themselves, but
+  // never touches the shuffle/repeat buttons — without this, a session that
+  // last ended with shuffle on starts back up still shuffling internally
+  // while the button shows off. Every "shuffle and play" action elsewhere
+  // only calls toggleShuffle() when shuffleOn is currently false, so once
+  // that mismatch exists nothing else was ever going to correct it.
+  player.onShuffleRepeatChange && player.onShuffleRepeatChange(shuffleOn, repeatMode);
 
   const savedPath = getSavedFolderPath();
   if (!savedPath) {
