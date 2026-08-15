@@ -660,7 +660,7 @@ async function rescanLibrary() {
     const doneMsg = `Done — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found.`;
     el.scanStatus.textContent = doneMsg;
     if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) {
-      el.searchResults.innerHTML = "";
+      renderSearchShortcuts();
     }
     showToast(`Search ready — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found`);
   } catch (err) {
@@ -1106,8 +1106,11 @@ el.searchBtn.addEventListener("click", async () => {
     // rescanLibrary()'s onProgress (via setScanProgressUI) takes over showing
     // live progress here now, same text as Settings, since the overlay is open.
     await ensureLibraryLoaded();
-    if (!el.searchInput.value.trim()) el.searchResults.innerHTML = "";
   }
+  // libraryLoaded can still be false here if that scan failed — rescanLibrary's
+  // own catch branch already left an error message in searchResults, so only
+  // step on it once there's actually a library to browse.
+  if (!el.searchInput.value.trim() && libraryLoaded) renderSearchShortcuts();
 });
 el.searchCloseBtn.addEventListener("click", () => el.searchOverlay.classList.add("hidden"));
 let searchDebounceTimer = null;
@@ -1118,9 +1121,17 @@ el.searchInput.addEventListener("input", () => {
 
 function runSearch() {
   const query = el.searchInput.value;
+  if (!query.trim()) {
+    // Nothing typed — Songs/Artists browse shortcuts occupy this same slot
+    // instead of leaving it blank. Not reachable until the library's loaded
+    // (see the searchBtn handler and rescanLibrary), so libraryTracks is
+    // always complete by the time this runs.
+    if (libraryLoaded) renderSearchShortcuts();
+    return;
+  }
   const results = searchLibrary(query);
   el.searchResults.innerHTML = "";
-  if (query.trim() && results.length === 0) {
+  if (results.length === 0) {
     el.searchResults.innerHTML = `<p class="status-msg">No matches.</p>`;
   }
   results.forEach((track, index) => {
@@ -1132,6 +1143,50 @@ function runSearch() {
         },
         onMenu: () => openAddToPlaylistModal(track),
       })
+    );
+  });
+}
+
+// ---------- Search overlay: Songs / Artists browse shortcuts ----------
+// Not search results — these are library-wide browse entry points, shown in
+// the exact same slot search results occupy whenever the query is empty.
+// Typing anything at any point falls through to normal filtered results via
+// runSearch() above; clearing the query back out returns here.
+function renderSearchShortcuts() {
+  el.searchResults.innerHTML = "";
+  el.searchResults.appendChild(
+    browseRow("🎵", "All Songs", libraryTracks.length, "song", () => openDetailList("All Songs", getAllSongs()))
+  );
+  el.searchResults.appendChild(browseRow("🎤", "Artists", getArtists().length, "artist", renderArtistsList));
+}
+
+// Same shape as a playlist row (icon + name + count) — tapping either opens
+// straight into openDetailList, the same tracklist view playlists already use.
+function browseRow(icon, name, count, unit, onOpen) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `
+    <span class="row-icon">${icon}</span>
+    <div class="row-text">
+      <div class="row-name">${escapeHtml(name)}</div>
+      <div class="row-sub">${count} ${unit}${count === 1 ? "" : "s"}</div>
+    </div>
+  `;
+  row.addEventListener("click", onOpen);
+  return row;
+}
+
+function renderArtistsList() {
+  const artists = getArtists();
+  el.searchResults.innerHTML = `<div class="toolbar"><button class="text-btn" id="artists-back-btn">‹ Back</button></div>`;
+  el.searchResults.querySelector("#artists-back-btn").addEventListener("click", renderSearchShortcuts);
+  if (artists.length === 0) {
+    el.searchResults.insertAdjacentHTML("beforeend", `<p class="status-msg">No artists found yet.</p>`);
+    return;
+  }
+  artists.forEach((artist) => {
+    el.searchResults.appendChild(
+      browseRow("🎤", artist.name, artist.tracks.length, "song", () => openDetailList(artist.name, artist.tracks))
     );
   });
 }
