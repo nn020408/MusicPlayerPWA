@@ -32,10 +32,11 @@ function getLibraryRootLabel() {
 
 // Bump this whenever the cached track shape or scan logic changes, so old
 // (possibly incomplete/stale) caches from a previous version of the app
-// don't get reused silently. Bumped to 4 for the artist-enrichment work below
-// — existing caches predate _needsArtistLookup and filename-guessed artists,
-// so they need a fresh scan to actually pick either up.
-const LIBRARY_CACHE_VERSION = 4;
+// don't get reused silently. Bumped to 5: _needsArtistLookup used to also be
+// satisfied by a filename guess, which could be wrong and would then never
+// get corrected — existing caches may have wrongly "resolved" tracks baked
+// in under that old logic, so they need a fresh scan to re-flag properly.
+const LIBRARY_CACHE_VERSION = 5;
 
 function loadCachedLibrary() {
   try {
@@ -92,11 +93,15 @@ function slimTrack(t) {
     id: t.id,
     name: t.name,
     audio: artist || album ? { artist, album } : null,
-    // Neither OneDrive's metadata nor the filename produced anything — flags
-    // this track for enrichArtists()'s background real-tag-read pass instead
-    // of silently staying "Unknown Artist" forever with no way to tell
-    // "genuinely unresolved" apart from "never actually checked".
-    _needsArtistLookup: !artist,
+    // Deliberately keyed on graphArtist alone, NOT the filename guess above —
+    // that guess is only ever a placeholder to show while waiting, never
+    // proof the artist is actually known. It can be flat-out wrong (a title
+    // with its own " - " in it, e.g. "El Preso - En Vivo.mp3", reads as
+    // artist "El Preso"), and treating a wrong guess as "resolved" would
+    // permanently block enrichArtists() from ever reading the real embedded
+    // tag underneath it and correcting it. Only OneDrive's own metadata
+    // counts as confirmed; everything else always gets the real check.
+    _needsArtistLookup: !graphArtist,
     _searchText: `${t.name} ${artist} ${album}`.toLowerCase(),
   };
 }
