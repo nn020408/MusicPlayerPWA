@@ -203,18 +203,18 @@ async function scanLibrary(onProgress) {
 // slimTrack as _needsArtistLookup). Deliberately NOT part of scanLibrary
 // itself — Search/Songs/Artists are usable the moment the scan above
 // finishes, and this keeps chipping away afterwards without blocking any of
-// that. Gentle on purpose: low concurrency, text-only reads via
-// readId3TagsLight, low-priority + silent Graph calls (never competes with or
-// spams the error log over something you're actively doing), a hard per-track
-// pacing delay below that caps the sustained request rate regardless of how
-// fast responses come back, and it skips entirely on a metered connection.
-// For a library in the thousands of songs this can take a real while, but
-// it's a genuine one-time cost — results get folded into the same cache
-// scanLibrary writes, and _needsArtistLookup is cleared per track whether or
-// not a tag was actually found, so a later app open never re-checks a track
-// this already looked at.
-const ENRICH_CONCURRENCY = 2;
-const ENRICH_PACE_MS = 500; // floor between one track finishing and the next starting, per concurrency slot — see the hard cap this produces, noted below
+// that. Text-only reads via readId3TagsLight, low-priority + silent Graph
+// calls (never competes with or spams the error log over something you're
+// actively doing), and it still skips entirely on a metered connection.
+// Concurrency/pacing below are tuned for throughput rather than being
+// maximally gentle — same origin, same request shape as the rest of the app
+// (matches SCAN_CONCURRENCY's folder-listing concurrency), just no longer
+// artificially slowed down on top of that. Results get folded into the same
+// cache scanLibrary writes, and _needsArtistLookup is cleared per track
+// whether or not a tag was actually found, so a later app open never
+// re-checks a track this already looked at.
+const ENRICH_CONCURRENCY = 6;
+const ENRICH_PACE_MS = 50; // small floor only, so a run of instant failures still can't fire back-to-back with literally zero gap
 let isEnriching = false;
 
 async function enrichArtists(onProgress) {
@@ -234,10 +234,10 @@ async function enrichArtists(onProgress) {
 
   try {
     // ENRICH_CONCURRENCY slots, each gated by ENRICH_PACE_MS before it can
-    // pick up its next track — a hard ceiling of (CONCURRENCY / PACE_MS)
-    // track-lookups/sec no matter how fast OneDrive responds or how many
-    // retries fire, i.e. at most ~4/sec here. Structurally incapable of
-    // bursting, unlike relying on concurrency alone.
+    // pick up its next track — throughput here is bounded by real OneDrive
+    // response latency (the thing actually worth waiting on), not by an
+    // artificial floor on top of it; ENRICH_PACE_MS just stops a slot from
+    // firing with literally zero gap if a lookup ever fails instantly.
     await runWithConcurrency(ENRICH_CONCURRENCY, candidates, async (track) => {
       try {
         // Retried with backoff the same as every other network read in this
