@@ -230,13 +230,27 @@ async function enrichArtists(onProgress) {
   try {
     await runWithConcurrency(ENRICH_CONCURRENCY, candidates, async (track) => {
       try {
-        // Reuse the URL captured during this session's scan when we have one
-        // (the common case) — only falls back to a fresh Graph call when
-        // resuming leftover candidates from a previous session's cache, where
-        // no fresh URL exists.
-        const url = urlById.get(track.id) || (await getDownloadUrl(track));
-        const tags = url && (await readId3TagsLight(url));
-        if (tags && (tags.artist || tags.album)) {
+        // Retried with backoff the same as every other network read in this
+        // app (folder listing, playback) — a bulk pass over thousands of
+        // tracks is exactly where a transient failure/rate-limit is likely,
+        // and without this a single bad moment would permanently give up on
+        // that track (see _needsArtistLookup being cleared below regardless
+        // of outcome) instead of just riding the blip out.
+        let attempt = 0;
+        const tags = await retryWithBackoff(
+          async () => {
+            // Only the very first attempt gets to use the URL captured
+            // during this session's scan — any retry always asks Graph for
+            // a fresh one, in case the cached one is what's actually bad.
+            const url = (attempt === 0 && urlById.get(track.id)) || (await getDownloadUrl(track));
+            attempt++;
+            const result = url && (await readId3TagsLight(url));
+            if (!result) throw new Error("Tag read came back empty"); // readId3TagsLight resolves null instead of rejecting — turn that back into a retryable failure
+            return result;
+          },
+          { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 8000 }
+        );
+        if (tags.artist || tags.album) {
           const artist = tags.artist || "";
           const album = tags.album || (track.audio && track.audio.album) || "";
           track.audio = artist || album ? { artist, album } : track.audio;
@@ -244,8 +258,9 @@ async function enrichArtists(onProgress) {
           if (artist) found++;
         }
       } catch {
-        // Network hiccup or unreadable file — falls through to marking this
-        // track checked below; a full "Rescan library" can retry it later.
+        // Genuinely exhausted retries, or the file just has no tag at all —
+        // falls through to marking this track checked below; a full
+        // "Rescan library" can retry it later.
       }
       track._needsArtistLookup = false;
       checked++;

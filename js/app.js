@@ -649,12 +649,22 @@ function kickOffArtistEnrichment() {
   if (artistEnrichmentStarted) return;
   artistEnrichmentStarted = true;
   let lastUiRefreshAt = 0;
+  let lastStatusAt = 0;
   enrichArtists((checked, total, found) => {
     const artistsListOpen = !el.searchOverlay.classList.contains("hidden") && !!el.searchResults.querySelector("#artists-back-btn");
     const isDone = checked === total;
     if (artistsListOpen && (isDone || checked - lastUiRefreshAt >= 50)) {
       lastUiRefreshAt = checked;
       renderArtistsList(); // don't leave the list looking stale while this fills it in live
+    }
+    // Visible in Settings (under "Rescan library") for as long as this runs —
+    // otherwise there's no way to tell "still working through a big library"
+    // apart from "actually stuck/finished", especially on a library this size.
+    if (isDone || checked - lastStatusAt >= 20) {
+      lastStatusAt = checked;
+      el.scanStatus.textContent = isDone
+        ? `Artist lookup done — found real tags for ${found} of ${total} song${total === 1 ? "" : "s"} that needed it.`
+        : `Finding artist info in the background… ${checked}/${total} checked, ${found} found so far.`;
     }
     if (isDone && found > 0) showToast(`Found artist info for ${found} more song${found === 1 ? "" : "s"}`);
   })
