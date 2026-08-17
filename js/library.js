@@ -203,13 +203,18 @@ async function scanLibrary(onProgress) {
 // slimTrack as _needsArtistLookup). Deliberately NOT part of scanLibrary
 // itself — Search/Songs/Artists are usable the moment the scan above
 // finishes, and this keeps chipping away afterwards without blocking any of
-// that. Gentle on purpose (low concurrency, text-only reads via
-// readId3TagsLight, skips entirely on a metered connection): for a library in
-// the thousands of songs this can take a while, but it's a real one-time
-// cost — results get folded into the same cache scanLibrary writes, and
-// _needsArtistLookup is cleared per track whether or not a tag was actually
-// found, so a later app open never re-checks a track this already looked at.
-const ENRICH_CONCURRENCY = 3;
+// that. Gentle on purpose: low concurrency, text-only reads via
+// readId3TagsLight, low-priority + silent Graph calls (never competes with or
+// spams the error log over something you're actively doing), a hard per-track
+// pacing delay below that caps the sustained request rate regardless of how
+// fast responses come back, and it skips entirely on a metered connection.
+// For a library in the thousands of songs this can take a real while, but
+// it's a genuine one-time cost — results get folded into the same cache
+// scanLibrary writes, and _needsArtistLookup is cleared per track whether or
+// not a tag was actually found, so a later app open never re-checks a track
+// this already looked at.
+const ENRICH_CONCURRENCY = 2;
+const ENRICH_PACE_MS = 500; // floor between one track finishing and the next starting, per concurrency slot — see the hard cap this produces, noted below
 let isEnriching = false;
 
 async function enrichArtists(onProgress) {
@@ -228,6 +233,11 @@ async function enrichArtists(onProgress) {
   let lastCheckpointAt = 0;
 
   try {
+    // ENRICH_CONCURRENCY slots, each gated by ENRICH_PACE_MS before it can
+    // pick up its next track — a hard ceiling of (CONCURRENCY / PACE_MS)
+    // track-lookups/sec no matter how fast OneDrive responds or how many
+    // retries fire, i.e. at most ~4/sec here. Structurally incapable of
+    // bursting, unlike relying on concurrency alone.
     await runWithConcurrency(ENRICH_CONCURRENCY, candidates, async (track) => {
       try {
         // Retried with backoff the same as every other network read in this
@@ -242,7 +252,11 @@ async function enrichArtists(onProgress) {
             // Only the very first attempt gets to use the URL captured
             // during this session's scan — any retry always asks Graph for
             // a fresh one, in case the cached one is what's actually bad.
-            const url = (attempt === 0 && urlById.get(track.id)) || (await getDownloadUrl(track));
+            // silent: a missing/failed lookup here is routine and already
+            // handled (track just stays unresolved), not worth the visible
+            // error log entry a real playback failure gets. priority: "low"
+            // so this never competes with something you're actively doing.
+            const url = (attempt === 0 && urlById.get(track.id)) || (await getDownloadUrl(track, { silent: true, priority: "low" }));
             attempt++;
             const result = url && (await readId3TagsLight(url));
             if (!result) throw new Error("Tag read came back empty"); // readId3TagsLight resolves null instead of rejecting — turn that back into a retryable failure
@@ -272,6 +286,7 @@ async function enrichArtists(onProgress) {
         lastCheckpointAt = checked;
         cacheLibrary(rootId);
       }
+      await new Promise((resolve) => setTimeout(resolve, ENRICH_PACE_MS));
       return [];
     });
   } finally {

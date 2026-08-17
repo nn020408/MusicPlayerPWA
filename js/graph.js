@@ -91,19 +91,24 @@ function listFolder(folderId, { priority } = {}) {
 // Fetch a fresh download URL for an item. No $select is used — a plain GET
 // on a personal OneDrive driveItem includes @microsoft.graph.downloadUrl by
 // default, which is more reliable than trying to select it explicitly.
-async function refreshDownloadUrl(itemId) {
-  const data = await graphGet(`/me/drive/items/${itemId}`);
+// `silent` skips the console.error below — used by library.js's background
+// artist-enrichment pass, where a missing downloadUrl for one of thousands of
+// tracks is routine and already handled (that track just stays unresolved),
+// not a real problem worth surfacing in the user-visible error log the way a
+// genuine playback failure is.
+async function refreshDownloadUrl(itemId, { silent, priority } = {}) {
+  const data = await graphGet(`/me/drive/items/${itemId}`, { priority });
   const url = data["@microsoft.graph.downloadUrl"];
   if (!url) {
-    console.error("Graph item response missing downloadUrl", data);
+    if (!silent) console.error("Graph item response missing downloadUrl", data);
     throw new Error("OneDrive didn't provide a download link for this item");
   }
   return url;
 }
 
 // Always fetch fresh — download URLs are short-lived and per-request anyway.
-async function getDownloadUrl(item) {
-  return refreshDownloadUrl(item.id);
+async function getDownloadUrl(item, options) {
+  return refreshDownloadUrl(item.id, options);
 }
 
 // OneDrive auto-generates thumbnails from embedded cover art for most audio
