@@ -47,7 +47,14 @@ const el = {
   themeList: document.getElementById("theme-list"),
   appVersionLabel: document.getElementById("app-version-label"),
   loginVersionLabel: document.getElementById("login-version-label"),
+  showIntroBtn: document.getElementById("show-intro-btn"),
   errorLogBtn: document.getElementById("error-log-btn"),
+
+  introOverlay: document.getElementById("intro-overlay"),
+  introBackBtn: document.getElementById("intro-back-btn"),
+  introNextBtn: document.getElementById("intro-next-btn"),
+  introRestoreBtn: document.getElementById("intro-restore-btn"),
+  introFinishBtn: document.getElementById("intro-finish-btn"),
 
   errorLogOverlay: document.getElementById("error-log-overlay"),
   errorLogBackBtn: document.getElementById("error-log-back-btn"),
@@ -935,6 +942,62 @@ function setLibraryFolder(folder) {
   libraryLoaded = false;
 }
 
+// ---------- First-time intro (#intro-overlay) ----------
+// Shown once automatically before the onboarding folder picker (see
+// showApp()), and reachable again anytime via Settings > "Show welcome guide
+// again" — introIsOnboarding tracks which of those two this run is, since
+// only the automatic first-time one should hand off into the folder picker
+// when it finishes; a revisit from Settings should just close.
+const INTRO_SEEN_KEY = "introSeenV1";
+const INTRO_PANEL_COUNT = 4;
+let introPanelIndex = 0;
+let introIsOnboarding = false;
+
+function showIntro(isOnboarding) {
+  introIsOnboarding = isOnboarding;
+  introPanelIndex = 0;
+  renderIntroPanel();
+  el.introOverlay.classList.remove("hidden");
+}
+
+function renderIntroPanel() {
+  document.querySelectorAll(".intro-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", Number(panel.dataset.panel) !== introPanelIndex);
+  });
+  document.querySelectorAll(".intro-dot").forEach((dot, i) => {
+    dot.classList.toggle("active", i === introPanelIndex);
+  });
+  el.introBackBtn.classList.toggle("hidden", introPanelIndex === 0);
+  // The last panel has its own two action buttons (restore/fresh-start)
+  // instead of a generic "Next" — hide that here rather than showing a
+  // dead-end "Next" that would just sit on the same panel forever.
+  el.introNextBtn.classList.toggle("hidden", introPanelIndex === INTRO_PANEL_COUNT - 1);
+}
+
+function finishIntro() {
+  localStorage.setItem(INTRO_SEEN_KEY, "1");
+  el.introOverlay.classList.add("hidden");
+  if (introIsOnboarding) openFolderPicker("onboarding");
+}
+
+el.introNextBtn.addEventListener("click", () => {
+  introPanelIndex = Math.min(introPanelIndex + 1, INTRO_PANEL_COUNT - 1);
+  renderIntroPanel();
+});
+el.introBackBtn.addEventListener("click", () => {
+  introPanelIndex = Math.max(introPanelIndex - 1, 0);
+  renderIntroPanel();
+});
+el.introFinishBtn.addEventListener("click", finishIntro);
+el.introRestoreBtn.addEventListener("click", () => {
+  restoreTriggeredFromIntro = true;
+  el.restoreFileInput.click();
+});
+el.showIntroBtn.addEventListener("click", () => {
+  el.settingsOverlay.classList.add("hidden");
+  showIntro(false);
+});
+
 // ---------- Playlists ----------
 function renderPlaylistsList() {
   const playlists = loadPlaylists();
@@ -1343,9 +1406,13 @@ function exportBackup() {
   showToast("Backup saved");
 }
 
-function importBackupFile(file) {
+// onDone(succeeded) is optional — used by the first-time intro flow (see
+// below) to know when a restore triggered from there has actually finished,
+// since FileReader is async and it needs to decide what to show next.
+function importBackupFile(file, onDone) {
   const reader = new FileReader();
   reader.onload = () => {
+    let succeeded = false;
     try {
       const backup = JSON.parse(reader.result);
       let addedPlaylists = 0;
@@ -1358,13 +1425,40 @@ function importBackupFile(file) {
       }
       if (backup.libraryCache) {
         localStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify(backup.libraryCache));
-        libraryLoaded = false; // picked up fresh next time Search/library is touched, if the root folder still matches
+        libraryLoaded = false;
+        // Swap the live in-memory library over immediately instead of just
+        // leaving stale data (and a stale Settings status line) sitting
+        // around until something else happens to touch the library later —
+        // that silence was exactly what made a restore look like it hadn't
+        // done anything.
+        if (loadCachedLibrary()) {
+          libraryLoaded = true;
+          const stillNeeded = libraryTracks.filter((t) => t._needsArtistLookup).length;
+          el.scanStatus.textContent =
+            stillNeeded > 0
+              ? `Restored — ${libraryTracks.length} songs, ${libraryTracks.length - stillNeeded} with artist info already, ${stillNeeded} still to check.`
+              : `Restored — ${libraryTracks.length} songs, all with artist info.`;
+          // If you're actually looking at the Artists list right now, don't
+          // leave it showing the pre-restore lineup until the next
+          // enrichment tick happens to refresh it.
+          if (!el.searchOverlay.classList.contains("hidden") && el.searchResults.querySelector("#artists-back-btn")) {
+            renderArtistsList();
+          }
+          kickOffArtistEnrichment(); // resumes whatever the backup left unfinished
+        } else {
+          // Doesn't match the currently selected music folder — falls back
+          // to a fresh scan next time the library is touched, same as
+          // before, but at least says so instead of staying silent.
+          el.scanStatus.textContent = "Restored — pick your OneDrive music folder to match this backup to use it.";
+        }
       }
       showToast(`Restored — ${addedPlaylists} playlist${addedPlaylists === 1 ? "" : "s"} added`);
+      succeeded = true;
     } catch (err) {
       console.error("Restore failed", err);
       showToast("Couldn't read that backup file");
     }
+    onDone && onDone(succeeded);
   };
   reader.readAsText(file);
 }
@@ -1373,9 +1467,22 @@ el.backupBtn.addEventListener("click", exportBackup);
 el.restoreBtn.addEventListener("click", () => el.restoreFileInput.click());
 el.restoreFileInput.addEventListener("change", () => {
   const file = el.restoreFileInput.files[0];
-  if (file) importBackupFile(file);
+  if (file) importBackupFile(file, restoreFileInputDone);
   el.restoreFileInput.value = ""; // reset so selecting the same file again still fires "change"
 });
+// Set only while the intro's "Restore from file" button is what triggered
+// el.restoreFileInput — lets one shared <input type=file> serve both Settings'
+// plain restore and the intro flow (which needs to know to continue into the
+// folder picker afterward) without duplicating the file input or the reader logic.
+let restoreTriggeredFromIntro = false;
+function restoreFileInputDone(succeeded) {
+  if (!restoreTriggeredFromIntro) return;
+  restoreTriggeredFromIntro = false;
+  // A failed restore leaves the intro open on the same panel so you can
+  // retry or fall back to "No, this is fresh" instead — only a genuine
+  // success advances into the folder picker.
+  if (succeeded) finishIntro();
+}
 
 // ---------- Error log (Settings > View error log) ----------
 function renderErrorLog() {
@@ -2316,6 +2423,19 @@ function handleBackPress() {
     el.detailOverlay.classList.add("hidden");
     return true;
   }
+  if (!el.introOverlay.classList.contains("hidden")) {
+    // Step back a panel first, same idea as the folder picker below. On the
+    // first panel: a revisit from Settings just closes; the mandatory
+    // first-run version has nowhere to go, so it consumes the press instead
+    // of letting it fall through to exiting the app mid-setup.
+    if (introPanelIndex > 0) {
+      introPanelIndex--;
+      renderIntroPanel();
+      return true;
+    }
+    if (!introIsOnboarding) el.introOverlay.classList.add("hidden");
+    return true;
+  }
   if (!el.folderPickerOverlay.classList.contains("hidden")) {
     // Step up one level within the picker itself first, same as the main
     // folder view — works in both onboarding and "change folder" mode, since
@@ -2435,7 +2555,15 @@ function showApp() {
 
   const savedPath = getSavedFolderPath();
   if (!savedPath) {
-    openFolderPicker("onboarding");
+    // First-time setup goes through the intro first (which itself opens the
+    // folder picker once dismissed — see finishIntro()); an existing user
+    // who somehow has no saved folder (e.g. cleared data) has already seen
+    // it, so skip straight to the picker instead of showing it again.
+    if (!localStorage.getItem(INTRO_SEEN_KEY)) {
+      showIntro(true);
+    } else {
+      openFolderPicker("onboarding");
+    }
   } else {
     openMainFolderView(savedPath);
     ensureLibraryLoaded(); // quietly builds/refreshes the search index in the background — no need to open Search first
@@ -2503,6 +2631,7 @@ el.signOutBtn.addEventListener("click", async () => {
   el.searchOverlay.classList.add("hidden");
   el.playlistsOverlay.classList.add("hidden");
   el.detailOverlay.classList.add("hidden");
+  el.introOverlay.classList.add("hidden");
   el.fullPlayer.classList.add("hidden");
   await signOut();
   // Web's signOut() navigates away (MSAL logoutRedirect) before this matters;

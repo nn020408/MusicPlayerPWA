@@ -100,6 +100,8 @@
         <button id="restore-btn" class="secondary-btn">Restore from file</button>
         <input id="restore-file-input" type="file" accept="application/json" class="hidden" />
         <hr />
+        <button id="show-intro-btn" class="secondary-btn">📖 Show welcome guide again</button>
+        <hr />
         <button id="error-log-btn" class="secondary-btn">🐞 View error log</button>
         <hr />
         <button id="sign-out-btn" class="secondary-btn danger">Sign out</button>
@@ -166,6 +168,50 @@
 
     <div id="toast" class="toast hidden"></div>
   </section>
+
+  <!-- First-time intro: shown once before the onboarding folder picker (see
+       showApp() in app.js), reachable again later via Settings > "Show
+       welcome guide again". Explains streaming/no-offline-playback, the
+       two-phase library scan, and the OneDrive/backup risk, then offers
+       either restoring a prior backup or continuing fresh into the folder
+       picker. -->
+  <div id="intro-overlay" class="overlay hidden">
+    <div id="intro-panels" class="intro-panels">
+      <div class="intro-panel" data-panel="0">
+        <h2>Welcome to NubePlayer</h2>
+        <p>This app streams your music straight from OneDrive — there's no offline playback, so it needs an internet connection to play anything. Nothing is ever downloaded permanently to this device.</p>
+      </div>
+      <div class="intro-panel hidden" data-panel="1">
+        <h2>Building your library</h2>
+        <p>Next you'll pick the OneDrive folder your music lives in. After that, two things happen:</p>
+        <p><strong>First</strong>, a fast scan gets browsing, Search, and playback working almost right away.</p>
+        <p><strong>Then</strong>, a slower background pass reads the real artist info embedded in each song, so Search and the Artists tab are accurate. On a large library this can take a while — but it's one-time only, and you can keep using the app normally while it runs.</p>
+      </div>
+      <div class="intro-panel hidden" data-panel="2">
+        <h2>A quick warning about OneDrive</h2>
+        <p>Your playlists and search index point at the exact files as they exist in OneDrive right now. If you rename, move, or delete those files in OneDrive later, those references can break and songs may show up missing.</p>
+        <p>Settings has a "Backup to file" option that saves your playlists and library index — worth doing every so often, and especially right before you reorganize your OneDrive music folder.</p>
+      </div>
+      <div class="intro-panel hidden" data-panel="3">
+        <h2>Already have a backup?</h2>
+        <p>If you're setting up a second device, or reinstalled the app, you can restore a previous backup file now instead of starting over.</p>
+        <button id="intro-restore-btn" class="secondary-btn">Restore from file</button>
+        <button id="intro-finish-btn" class="primary-btn">No, this is fresh — let's go</button>
+      </div>
+    </div>
+    <div class="intro-footer">
+      <div id="intro-dots" class="intro-dots">
+        <span class="intro-dot active"></span>
+        <span class="intro-dot"></span>
+        <span class="intro-dot"></span>
+        <span class="intro-dot"></span>
+      </div>
+      <div class="intro-nav">
+        <button id="intro-back-btn" class="text-btn hidden">‹ Back</button>
+        <button id="intro-next-btn" class="primary-btn">Next</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Folder picker: first-run onboarding AND "change music folder" from Settings -->
   <div id="folder-picker-overlay" class="overlay hidden">
