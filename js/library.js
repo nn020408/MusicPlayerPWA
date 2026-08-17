@@ -227,6 +227,12 @@ async function enrichArtists(onProgress) {
   pendingEnrichmentQueue = null;
 
   isEnriching = true;
+  // See setArtistEnrichmentKeepAlive in player.js: on Android, this pass
+  // needs the WebView kept "audible" with the screen off exactly the way
+  // playback does — same fetch()+setTimeout machinery, same freeze risk if
+  // nothing's actively playing while this runs. No-op on web/if nothing has
+  // triggered the native keep-alive element to exist.
+  if (typeof setArtistEnrichmentKeepAlive === "function") setArtistEnrichmentKeepAlive(true);
   const rootId = getLibraryRootId();
   let checked = 0;
   let found = 0;
@@ -291,6 +297,7 @@ async function enrichArtists(onProgress) {
     });
   } finally {
     isEnriching = false;
+    if (typeof setArtistEnrichmentKeepAlive === "function") setArtistEnrichmentKeepAlive(false);
   }
   cacheLibrary(rootId);
 }
