@@ -938,7 +938,15 @@ el.folderPickerCancelBtn.addEventListener("click", () => {
 
 function setLibraryFolder(folder) {
   localStorage.setItem(DEFAULT_FOLDER_KEY, JSON.stringify([folder]));
-  localStorage.removeItem(LIBRARY_CACHE_KEY);
+  // Deliberately NOT clearing the library cache here — loadCachedLibrary()
+  // already checks the cached rootId against this folder and rejects it on
+  // its own if they don't match, forcing a fresh scan exactly when one's
+  // actually needed. Force-deleting it unconditionally used to throw away a
+  // perfectly valid cache any time this folder happens to match one already
+  // cached — most visibly right after Restore from file, which writes a
+  // fresh cache for the restored folder just before this runs (the intro's
+  // restore flow sends you into this same picker afterward), making every
+  // restore immediately force a full rescan instead of using what was just restored.
   libraryLoaded = false;
 }
 
