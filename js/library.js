@@ -85,23 +85,31 @@ function guessArtistFromFilename(name) {
 // and silently fail to cache. Keep only what display/search/playback need.
 // _searchText is precomputed once here (not per keystroke) so Search stays
 // cheap even while you're typing.
-function slimTrack(t) {
+// priorAudioById (id -> {artist, album}) carries forward whatever a previous
+// enrichArtists() pass already confirmed for this exact track, across a
+// rescan — without it, every "Rescan library" (e.g. after adding new songs)
+// would throw all of that background work away and force the whole thing to
+// redo itself for your ENTIRE library, not just the new files, since a fresh
+// scan otherwise has no memory of anything found in a prior session.
+function slimTrack(t, priorAudioById) {
   const graphArtist = (t.audio && t.audio.artist) || "";
-  const album = (t.audio && t.audio.album) || "";
-  const artist = graphArtist || guessArtistFromFilename(t.name) || "";
+  const graphAlbum = (t.audio && t.audio.album) || "";
+  const prior = !graphArtist && priorAudioById ? priorAudioById.get(t.id) : null;
+  const artist = graphArtist || (prior && prior.artist) || guessArtistFromFilename(t.name) || "";
+  const album = graphAlbum || (prior && prior.album) || "";
   return {
     id: t.id,
     name: t.name,
     audio: artist || album ? { artist, album } : null,
-    // Deliberately keyed on graphArtist alone, NOT the filename guess above —
-    // that guess is only ever a placeholder to show while waiting, never
-    // proof the artist is actually known. It can be flat-out wrong (a title
-    // with its own " - " in it, e.g. "El Preso - En Vivo.mp3", reads as
-    // artist "El Preso"), and treating a wrong guess as "resolved" would
+    // Deliberately keyed on graphArtist/prior alone, NOT the filename guess
+    // above — that guess is only ever a placeholder to show while waiting,
+    // never proof the artist is actually known. It can be flat-out wrong (a
+    // title with its own " - " in it, e.g. "El Preso - En Vivo.mp3", reads
+    // as artist "El Preso"), and treating a wrong guess as "resolved" would
     // permanently block enrichArtists() from ever reading the real embedded
-    // tag underneath it and correcting it. Only OneDrive's own metadata
-    // counts as confirmed; everything else always gets the real check.
-    _needsArtistLookup: !graphArtist,
+    // tag underneath it and correcting it. OneDrive's own metadata and a
+    // confirmed prior result both count; everything else gets the real check.
+    _needsArtistLookup: !graphArtist && !(prior && prior.artist),
     _searchText: `${t.name} ${artist} ${album}`.toLowerCase(),
   };
 }
@@ -158,6 +166,13 @@ async function scanLibrary(onProgress) {
   if (isScanning) return libraryTracks;
   isScanning = true;
   const rootId = getLibraryRootId();
+  // Snapshot of whatever enrichArtists() already confirmed in a previous
+  // scan/session, keyed by track id — see the comment on slimTrack's
+  // priorAudioById param for why this matters (a rescan otherwise has no
+  // memory of it and would force the whole background pass to redo itself).
+  const priorAudioById = new Map(
+    libraryTracks.filter((t) => !t._needsArtistLookup && t.audio && t.audio.artist).map((t) => [t.id, t.audio])
+  );
   const tracks = [];
   const enrichmentQueue = [];
   let foldersScanned = 0;
@@ -173,7 +188,7 @@ async function scanLibrary(onProgress) {
       },
     });
     for (const t of folderTracks) {
-      const slim = slimTrack(t);
+      const slim = slimTrack(t, priorAudioById);
       tracks.push(slim);
       if (slim._needsArtistLookup && t["@microsoft.graph.downloadUrl"]) {
         enrichmentQueue.push({ id: slim.id, url: t["@microsoft.graph.downloadUrl"] });
