@@ -613,7 +613,7 @@ function openMainFolderView(stack) {
   openFolder(folderStack[folderStack.length - 1].id, false);
 }
 
-// ---------- Library scan (powers Search only — the main view is folder browsing) ----------
+// ---------- Library scan (powers Search, Songs, and Artists — the main view itself is folder browsing) ----------
 // Tracks an in-progress scan so every caller (the automatic one on app open,
 // and Search opening before it's finished) shares the same attempt instead
 // of each kicking off its own — that was the cause of a second "Scanning…"
@@ -628,12 +628,40 @@ async function ensureLibraryLoaded() {
   }
   if (loadCachedLibrary()) {
     libraryLoaded = true;
+    kickOffArtistEnrichment();
     return;
   }
   libraryLoadPromise = rescanLibrary().finally(() => {
     libraryLoadPromise = null;
   });
   await libraryLoadPromise;
+  if (libraryLoaded) kickOffArtistEnrichment();
+}
+
+// Fire-and-forget: enrichArtists() (library.js) is a slow, unattended
+// background pass by design, so this never gets awaited by its caller above.
+// artistEnrichmentStarted guards against kicking off a second overlapping
+// pass — ensureLibraryLoaded() can call in here from more than one place
+// (cache-hit vs. fresh-scan) across the app's lifetime (e.g. after "Rescan
+// library" in Settings runs again later).
+let artistEnrichmentStarted = false;
+function kickOffArtistEnrichment() {
+  if (artistEnrichmentStarted) return;
+  artistEnrichmentStarted = true;
+  let lastUiRefreshAt = 0;
+  enrichArtists((checked, total, found) => {
+    const artistsListOpen = !el.searchOverlay.classList.contains("hidden") && !!el.searchResults.querySelector("#artists-back-btn");
+    const isDone = checked === total;
+    if (artistsListOpen && (isDone || checked - lastUiRefreshAt >= 50)) {
+      lastUiRefreshAt = checked;
+      renderArtistsList(); // don't leave the list looking stale while this fills it in live
+    }
+    if (isDone && found > 0) showToast(`Found artist info for ${found} more song${found === 1 ? "" : "s"}`);
+  })
+    .catch((err) => console.error("Artist enrichment failed", err))
+    .finally(() => {
+      artistEnrichmentStarted = false; // allow a later rescan to kick off another pass over whatever's newly unresolved
+    });
 }
 
 // Mirrors scan progress into whichever of Settings / Search is currently

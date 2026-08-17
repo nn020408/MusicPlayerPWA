@@ -32,3 +32,20 @@ function readId3Tags(fileUrl) {
     });
   });
 }
+
+// Text-only companion to readId3Tags() above, used by library.js's one-time
+// background artist-enrichment pass (thousands of files, not just one) —
+// setTagsToRead skips the picture frame entirely, since embedded cover art
+// can be hundreds of KB to a few MB per file and would turn a cheap per-file
+// range-read into real bandwidth multiplied by however many songs need it.
+function readId3TagsLight(fileUrl) {
+  return new Promise((resolve) => {
+    new jsmediatags.Reader(fileUrl).setTagsToRead(["artist", "album", "title"]).read({
+      onSuccess: (tag) => {
+        const t = (tag && tag.tags) || {};
+        resolve({ artist: t.artist || null, album: t.album || null, title: t.title || null });
+      },
+      onError: () => resolve(null),
+    });
+  });
+}

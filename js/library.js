@@ -32,8 +32,10 @@ function getLibraryRootLabel() {
 
 // Bump this whenever the cached track shape or scan logic changes, so old
 // (possibly incomplete/stale) caches from a previous version of the app
-// don't get reused silently.
-const LIBRARY_CACHE_VERSION = 3;
+// don't get reused silently. Bumped to 4 for the artist-enrichment work below
+// — existing caches predate _needsArtistLookup and filename-guessed artists,
+// so they need a fresh scan to actually pick either up.
+const LIBRARY_CACHE_VERSION = 4;
 
 function loadCachedLibrary() {
   try {
@@ -62,6 +64,20 @@ function cacheLibrary(rootId) {
   }
 }
 
+// Best-effort artist guess from "Artist - Title.mp3"-style filenames (also
+// handles a leading track number: "03 - Artist - Title.mp3"). Free and
+// instant — no network — so always tried first, before ever resorting to a
+// real (networked) tag read. OneDrive's own automatic metadata extraction
+// (t.audio.artist below) is inconsistent enough across formats/sources that
+// on some libraries it comes back empty for nearly everything, which is what
+// this and enrichArtists() together exist to work around.
+function guessArtistFromFilename(name) {
+  const base = name.replace(/\.[^/.]+$/, "");
+  const withoutTrackNumber = base.replace(/^\s*\d{1,3}[\s.\-_]+/, "");
+  const parts = withoutTrackNumber.split(/\s+-\s+/);
+  return parts.length >= 2 && parts[0].trim() ? parts[0].trim() : null;
+}
+
 // Graph's raw item objects carry a lot we don't need to keep around (download
 // URLs, file hashes, full parent paths, timestamps) — for a few thousand
 // tracks that's easily several MB, enough to blow past localStorage's quota
@@ -69,12 +85,18 @@ function cacheLibrary(rootId) {
 // _searchText is precomputed once here (not per keystroke) so Search stays
 // cheap even while you're typing.
 function slimTrack(t) {
-  const artist = (t.audio && t.audio.artist) || "";
+  const graphArtist = (t.audio && t.audio.artist) || "";
   const album = (t.audio && t.audio.album) || "";
+  const artist = graphArtist || guessArtistFromFilename(t.name) || "";
   return {
     id: t.id,
     name: t.name,
-    audio: t.audio ? { artist: t.audio.artist, album: t.audio.album } : null,
+    audio: artist || album ? { artist, album } : null,
+    // Neither OneDrive's metadata nor the filename produced anything — flags
+    // this track for enrichArtists()'s background real-tag-read pass instead
+    // of silently staying "Unknown Artist" forever with no way to tell
+    // "genuinely unresolved" apart from "never actually checked".
+    _needsArtistLookup: !artist,
     _searchText: `${t.name} ${artist} ${album}`.toLowerCase(),
   };
 }
@@ -119,11 +141,20 @@ function runWithConcurrency(concurrency, initialItems, handler) {
 // show live scan feedback.
 const SCAN_CONCURRENCY = 5;
 
+// Populated by scanLibrary() below with { id, url } for every track flagged
+// _needsArtistLookup — url is the @microsoft.graph.downloadUrl already
+// returned by this same folder listing (session-only, never persisted: it's
+// short-lived and slimTrack() deliberately strips it from the cached shape).
+// enrichArtists() consumes and clears this so it can reuse those URLs instead
+// of asking Graph for a fresh one per track — same data, half the requests.
+let pendingEnrichmentQueue = null;
+
 async function scanLibrary(onProgress) {
   if (isScanning) return libraryTracks;
   isScanning = true;
   const rootId = getLibraryRootId();
   const tracks = [];
+  const enrichmentQueue = [];
   let foldersScanned = 0;
 
   async function handleFolder(folderId) {
@@ -136,7 +167,13 @@ async function scanLibrary(onProgress) {
         onProgress && onProgress(foldersScanned, tracks.length, `connection trouble — retrying (${attempt})…`);
       },
     });
-    tracks.push(...folderTracks.map(slimTrack));
+    for (const t of folderTracks) {
+      const slim = slimTrack(t);
+      tracks.push(slim);
+      if (slim._needsArtistLookup && t["@microsoft.graph.downloadUrl"]) {
+        enrichmentQueue.push({ id: slim.id, url: t["@microsoft.graph.downloadUrl"] });
+      }
+    }
     foldersScanned++;
     onProgress && onProgress(foldersScanned, tracks.length);
     return folders.map((f) => f.id);
@@ -152,7 +189,75 @@ async function scanLibrary(onProgress) {
   } finally {
     isScanning = false;
   }
+  pendingEnrichmentQueue = enrichmentQueue;
   return libraryTracks;
+}
+
+// One-time background pass to find real artist tags for whatever OneDrive's
+// own metadata and the filename guess both came up empty on (flagged by
+// slimTrack as _needsArtistLookup). Deliberately NOT part of scanLibrary
+// itself — Search/Songs/Artists are usable the moment the scan above
+// finishes, and this keeps chipping away afterwards without blocking any of
+// that. Gentle on purpose (low concurrency, text-only reads via
+// readId3TagsLight, skips entirely on a metered connection): for a library in
+// the thousands of songs this can take a while, but it's a real one-time
+// cost — results get folded into the same cache scanLibrary writes, and
+// _needsArtistLookup is cleared per track whether or not a tag was actually
+// found, so a later app open never re-checks a track this already looked at.
+const ENRICH_CONCURRENCY = 3;
+let isEnriching = false;
+
+async function enrichArtists(onProgress) {
+  if (isEnriching) return;
+  if (navigator.connection && navigator.connection.saveData) return; // respect data saver, same as player.js's prefetchNextTrackBlob
+  const candidates = libraryTracks.filter((t) => t._needsArtistLookup);
+  if (candidates.length === 0) return;
+
+  const urlById = new Map((pendingEnrichmentQueue || []).map((e) => [e.id, e.url]));
+  pendingEnrichmentQueue = null;
+
+  isEnriching = true;
+  const rootId = getLibraryRootId();
+  let checked = 0;
+  let found = 0;
+  let lastCheckpointAt = 0;
+
+  try {
+    await runWithConcurrency(ENRICH_CONCURRENCY, candidates, async (track) => {
+      try {
+        // Reuse the URL captured during this session's scan when we have one
+        // (the common case) — only falls back to a fresh Graph call when
+        // resuming leftover candidates from a previous session's cache, where
+        // no fresh URL exists.
+        const url = urlById.get(track.id) || (await getDownloadUrl(track));
+        const tags = url && (await readId3TagsLight(url));
+        if (tags && (tags.artist || tags.album)) {
+          const artist = tags.artist || "";
+          const album = tags.album || (track.audio && track.audio.album) || "";
+          track.audio = artist || album ? { artist, album } : track.audio;
+          track._searchText = `${track.name} ${artist} ${album}`.toLowerCase();
+          if (artist) found++;
+        }
+      } catch {
+        // Network hiccup or unreadable file — falls through to marking this
+        // track checked below; a full "Rescan library" can retry it later.
+      }
+      track._needsArtistLookup = false;
+      checked++;
+      onProgress && onProgress(checked, candidates.length, found);
+      // Periodic checkpoint so closing the app mid-pass doesn't lose
+      // everything found so far — same idea as player.js's throttled
+      // savePlaybackState, just counted in tracks instead of milliseconds.
+      if (checked - lastCheckpointAt >= 200) {
+        lastCheckpointAt = checked;
+        cacheLibrary(rootId);
+      }
+      return [];
+    });
+  } finally {
+    isEnriching = false;
+  }
+  cacheLibrary(rootId);
 }
 
 function getAllSongs() {
