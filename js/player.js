@@ -63,42 +63,17 @@ if (isNative()) {
   keepAliveEl.loop = true;
 }
 
-// More than one thing can need the WebView kept "audible" at once — playback
-// intent is one (see setWantsToPlay below), and library.js's background
-// artist-enrichment pass is another: it has the exact same "must keep running
-// with the screen off" requirement, since it's just as reliant on fetch +
-// setTimeout as the network-retry logic this whole mechanism exists for.
-// keepAliveEl plays whenever this set is non-empty, stops only once it's
-// empty — so enrichment running without active playback (or vice versa)
-// still gets protected, and neither one can prematurely stop the other's.
-const keepAliveReasons = new Set();
-
-function setKeepAliveReason(reason, active) {
-  const wasOn = keepAliveReasons.size > 0;
-  if (active) keepAliveReasons.add(reason);
-  else keepAliveReasons.delete(reason);
-  const isOn = keepAliveReasons.size > 0;
-  if (isOn === wasOn || !keepAliveEl) return;
-  if (isOn) keepAliveEl.play().catch(() => {});
-  else keepAliveEl.pause();
-}
-
-// Drives the "playback" keep-alive reason. Called with true wherever playback
-// is started/resumed, and false only where playback intent genuinely ends
-// (user pause, sign-out, queue exhausted) — deliberately NOT tied to
-// audioEl's own pause/play events, since those also fire for the transient
-// mid-retry pause this exists to survive.
+// Drives keepAliveEl. Called with true wherever playback is started/resumed,
+// and false only where playback intent genuinely ends (user pause, sign-out,
+// queue exhausted) — deliberately NOT tied to audioEl's own pause/play events,
+// since those also fire for the transient mid-retry pause this exists to
+// survive.
 function setWantsToPlay(value) {
   if (wantsToPlay === value) return;
   wantsToPlay = value;
-  setKeepAliveReason("playback", value);
-}
-
-// Drives the "artist-enrichment" keep-alive reason — see the comment on
-// keepAliveReasons above. Called by library.js's enrichArtists(), which has
-// no reason of its own to know about audioEl/wantsToPlay at all.
-function setArtistEnrichmentKeepAlive(active) {
-  setKeepAliveReason("artist-enrichment", active);
+  if (!keepAliveEl) return;
+  if (value) keepAliveEl.play().catch(() => {});
+  else keepAliveEl.pause();
 }
 
 // Only present inside the Capacitor-wrapped Android app (js/vendor/) — a

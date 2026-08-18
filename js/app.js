@@ -620,7 +620,7 @@ function openMainFolderView(stack) {
   openFolder(folderStack[folderStack.length - 1].id, false);
 }
 
-// ---------- Library scan (powers Search, Songs, and Artists — the main view itself is folder browsing) ----------
+// ---------- Library scan (powers Search — the main view itself is folder browsing) ----------
 // Tracks an in-progress scan so every caller (the automatic one on app open,
 // and Search opening before it's finished) shares the same attempt instead
 // of each kicking off its own — that was the cause of a second "Scanning…"
@@ -635,50 +635,34 @@ async function ensureLibraryLoaded() {
   }
   if (loadCachedLibrary()) {
     libraryLoaded = true;
-    kickOffArtistEnrichment();
     return;
   }
   libraryLoadPromise = rescanLibrary().finally(() => {
     libraryLoadPromise = null;
   });
   await libraryLoadPromise;
-  if (libraryLoaded) kickOffArtistEnrichment();
 }
 
-// Fire-and-forget: enrichArtists() (library.js) is a slow, unattended
-// background pass by design, so this never gets awaited by its caller above.
-// artistEnrichmentStarted guards against kicking off a second overlapping
-// pass — ensureLibraryLoaded() can call in here from more than one place
-// (cache-hit vs. fresh-scan) across the app's lifetime (e.g. after "Rescan
-// library" in Settings runs again later).
-let artistEnrichmentStarted = false;
-function kickOffArtistEnrichment() {
-  if (artistEnrichmentStarted) return;
-  artistEnrichmentStarted = true;
-  let lastUiRefreshAt = 0;
-  let lastStatusAt = 0;
-  enrichArtists((checked, total, found) => {
-    const artistsListOpen = !el.searchOverlay.classList.contains("hidden") && !!el.searchResults.querySelector("#artists-back-btn");
-    const isDone = checked === total;
-    if (artistsListOpen && (isDone || checked - lastUiRefreshAt >= 50)) {
-      lastUiRefreshAt = checked;
-      renderArtistsList(); // don't leave the list looking stale while this fills it in live
-    }
-    // Visible in Settings (under "Rescan library") for as long as this runs —
-    // otherwise there's no way to tell "still working through a big library"
-    // apart from "actually stuck/finished", especially on a library this size.
-    if (isDone || checked - lastStatusAt >= 20) {
-      lastStatusAt = checked;
-      el.scanStatus.textContent = isDone
-        ? `Artist lookup done — found real tags for ${found} of ${total} song${total === 1 ? "" : "s"} that needed it.`
-        : `Finding artist info in the background… ${checked}/${total} checked, ${found} found so far.`;
-    }
-    if (isDone && found > 0) showToast(`Found artist info for ${found} more song${found === 1 ? "" : "s"}`);
-  })
-    .catch((err) => console.error("Artist enrichment failed", err))
-    .finally(() => {
-      artistEnrichmentStarted = false; // allow a later rescan to kick off another pass over whatever's newly unresolved
-    });
+// Cancels an in-progress scan and waits for it to actually wind down
+// (stopLibraryWork() only signals — the loop still needs a moment to notice
+// and drain) before resolving. Used wherever new library work is about to
+// replace old (restore, a fresh manual rescan) so the old scan can't keep
+// grinding on data that's about to be thrown away — capped so a stuck loop
+// can't hang the caller forever.
+async function stopLibraryWorkAndWait() {
+  stopLibraryWork();
+  for (let i = 0; i < 40 && isLibraryWorkActive(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+// Settings' "Rescan library" button doubles as a Stop control while a scan is
+// actively running — same button, same slot, since the two states are
+// mutually exclusive from the user's point of view.
+function updateRescanButtonUI() {
+  const active = isLibraryWorkActive();
+  el.rescanLibraryBtn.textContent = active ? "⏹ Stop scanning" : "Rescan library";
+  el.rescanLibraryBtn.classList.toggle("danger", active);
 }
 
 // Mirrors scan progress into whichever of Settings / Search is currently
@@ -691,8 +675,12 @@ function setScanProgressUI(html) {
 }
 
 async function rescanLibrary() {
+  // A scan already in progress (e.g. triggered elsewhere) would otherwise
+  // keep running alongside this new one, both racing to write libraryTracks.
+  await stopLibraryWorkAndWait();
   clearFolderListCache(); // otherwise "rescan" would just re-read cached folder data
   showToast("Scanning your music for search…");
+  updateRescanButtonUI();
   let finalFolderCount = 0;
   const onProgress = (folders, tracks, warning) => {
     finalFolderCount = folders;
@@ -705,7 +693,7 @@ async function rescanLibrary() {
     const doneMsg = `Done — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found.`;
     el.scanStatus.textContent = doneMsg;
     if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) {
-      renderSearchShortcuts();
+      el.searchResults.innerHTML = "";
     }
     showToast(`Search ready — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found`);
   } catch (err) {
@@ -715,6 +703,8 @@ async function rescanLibrary() {
       el.searchResults.innerHTML = `<p class="status-msg">Couldn't finish scanning your library.</p>`;
     }
     showToast("Couldn't finish scanning your library");
+  } finally {
+    updateRescanButtonUI();
   }
 }
 
@@ -1205,7 +1195,7 @@ el.shuffleViewBtn.addEventListener("click", async () => {
   }
 });
 
-// ---------- Search ----------
+// ---------- Search (song names only for now — see the note at the top of library.js) ----------
 el.searchBtn.addEventListener("click", async () => {
   el.searchOverlay.classList.remove("hidden");
   el.searchInput.value = "";
@@ -1216,10 +1206,6 @@ el.searchBtn.addEventListener("click", async () => {
     // live progress here now, same text as Settings, since the overlay is open.
     await ensureLibraryLoaded();
   }
-  // libraryLoaded can still be false here if that scan failed — rescanLibrary's
-  // own catch branch already left an error message in searchResults, so only
-  // step on it once there's actually a library to browse.
-  if (!el.searchInput.value.trim() && libraryLoaded) renderSearchShortcuts();
 });
 el.searchCloseBtn.addEventListener("click", () => el.searchOverlay.classList.add("hidden"));
 let searchDebounceTimer = null;
@@ -1230,17 +1216,9 @@ el.searchInput.addEventListener("input", () => {
 
 function runSearch() {
   const query = el.searchInput.value;
-  if (!query.trim()) {
-    // Nothing typed — Songs/Artists browse shortcuts occupy this same slot
-    // instead of leaving it blank. Not reachable until the library's loaded
-    // (see the searchBtn handler and rescanLibrary), so libraryTracks is
-    // always complete by the time this runs.
-    if (libraryLoaded) renderSearchShortcuts();
-    return;
-  }
   const results = searchLibrary(query);
   el.searchResults.innerHTML = "";
-  if (results.length === 0) {
+  if (query.trim() && results.length === 0) {
     el.searchResults.innerHTML = `<p class="status-msg">No matches.</p>`;
   }
   results.forEach((track, index) => {
@@ -1252,50 +1230,6 @@ function runSearch() {
         },
         onMenu: () => openAddToPlaylistModal(track),
       })
-    );
-  });
-}
-
-// ---------- Search overlay: Songs / Artists browse shortcuts ----------
-// Not search results — these are library-wide browse entry points, shown in
-// the exact same slot search results occupy whenever the query is empty.
-// Typing anything at any point falls through to normal filtered results via
-// runSearch() above; clearing the query back out returns here.
-function renderSearchShortcuts() {
-  el.searchResults.innerHTML = "";
-  el.searchResults.appendChild(
-    browseRow("🎵", "All Songs", libraryTracks.length, "song", () => openDetailList("All Songs", getAllSongs()))
-  );
-  el.searchResults.appendChild(browseRow("🎤", "Artists", getArtists().length, "artist", renderArtistsList));
-}
-
-// Same shape as a playlist row (icon + name + count) — tapping either opens
-// straight into openDetailList, the same tracklist view playlists already use.
-function browseRow(icon, name, count, unit, onOpen) {
-  const row = document.createElement("div");
-  row.className = "row";
-  row.innerHTML = `
-    <span class="row-icon">${icon}</span>
-    <div class="row-text">
-      <div class="row-name">${escapeHtml(name)}</div>
-      <div class="row-sub">${count} ${unit}${count === 1 ? "" : "s"}</div>
-    </div>
-  `;
-  row.addEventListener("click", onOpen);
-  return row;
-}
-
-function renderArtistsList() {
-  const artists = getArtists();
-  el.searchResults.innerHTML = `<div class="toolbar"><button class="text-btn" id="artists-back-btn">‹ Back</button></div>`;
-  el.searchResults.querySelector("#artists-back-btn").addEventListener("click", renderSearchShortcuts);
-  if (artists.length === 0) {
-    el.searchResults.insertAdjacentHTML("beforeend", `<p class="status-msg">No artists found yet.</p>`);
-    return;
-  }
-  artists.forEach((artist) => {
-    el.searchResults.appendChild(
-      browseRow("🎤", artist.name, artist.tracks.length, "song", () => openDetailList(artist.name, artist.tracks))
     );
   });
 }
@@ -1371,10 +1305,22 @@ el.settingsBtn.addEventListener("click", () => {
   // wiping it was erasing the auto-scan's result the moment you opened
   // Settings to go check it.
   renderThemeList();
+  updateRescanButtonUI(); // reflects a pass that's been running since before Settings was opened
   el.settingsOverlay.classList.remove("hidden");
 });
 el.settingsCloseBtn.addEventListener("click", () => el.settingsOverlay.classList.add("hidden"));
-el.rescanLibraryBtn.addEventListener("click", () => rescanLibrary());
+el.rescanLibraryBtn.addEventListener("click", () => {
+  // Same button doubles as Stop while something's already running — see
+  // updateRescanButtonUI(). stopLibraryWorkAndWait() (called from within
+  // rescanLibrary() itself too) is what actually does the cancelling; this
+  // branch just covers tapping Stop with no rescan intended to follow it.
+  if (isLibraryWorkActive()) {
+    showToast("Stopping…");
+    stopLibraryWorkAndWait().then(updateRescanButtonUI);
+    return;
+  }
+  rescanLibrary();
+});
 el.changeFolderBtn.addEventListener("click", () => {
   el.settingsOverlay.classList.add("hidden");
   openFolderPicker("change");
@@ -1385,7 +1331,7 @@ el.changeFolderBtn.addEventListener("click", () => {
 // so it can't affect app speed. Safe to include the search index: it only
 // stores each song's permanent OneDrive id, never the short-lived streaming
 // link, so nothing in the backup can go stale.
-function exportBackup() {
+async function exportBackup() {
   let libraryCache = null;
   try {
     const raw = localStorage.getItem(LIBRARY_CACHE_KEY);
@@ -1401,12 +1347,43 @@ function exportBackup() {
     playlists: loadPlaylists(),
     libraryCache,
   };
+  const json = JSON.stringify(backup, null, 2);
+  const filename = `musicplayer-backup-${new Date().toISOString().slice(0, 10)}.json`;
 
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  // The <a download> + blob-URL trick below is a real-browser technique —
+  // Android's WebView (what wraps this app) doesn't reliably implement
+  // download-attribute handling for blob: URLs the way Chrome/Firefox do, so
+  // on native this silently did nothing at all. Native instead writes the
+  // file to the app's cache dir via Filesystem, then hands off to Android's
+  // own share sheet via Share so you pick where it actually ends up (Files,
+  // Drive, email, etc.) — that sidesteps needing any storage permission.
+  if (isNative() && window.Capacitor.Plugins.Filesystem && window.Capacitor.Plugins.Share) {
+    try {
+      const { Filesystem, Share } = window.Capacitor.Plugins;
+      const written = await Filesystem.writeFile({
+        path: filename,
+        data: json,
+        directory: window.capacitorFilesystem.Directory.Cache,
+        encoding: window.capacitorFilesystem.Encoding.UTF8,
+      });
+      await Share.share({
+        title: "NubePlayer backup",
+        text: "Your NubePlayer playlists and library backup",
+        url: written.uri,
+        dialogTitle: "Save backup to…",
+      });
+    } catch (err) {
+      console.error("Backup failed", err);
+      showToast("Couldn't create backup file");
+    }
+    return;
+  }
+
+  const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `musicplayer-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1419,7 +1396,7 @@ function exportBackup() {
 // since FileReader is async and it needs to decide what to show next.
 function importBackupFile(file, onDone) {
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     let succeeded = false;
     try {
       const backup = JSON.parse(reader.result);
@@ -1432,6 +1409,9 @@ function importBackupFile(file, onDone) {
         savePlaylists(existing.concat(newOnes));
       }
       if (backup.libraryCache) {
+        // A scan actively running against the OLD library would otherwise
+        // keep grinding away on data this restore is about to throw away.
+        await stopLibraryWorkAndWait();
         localStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify(backup.libraryCache));
         libraryLoaded = false;
         // Swap the live in-memory library over immediately instead of just
@@ -1441,18 +1421,7 @@ function importBackupFile(file, onDone) {
         // done anything.
         if (loadCachedLibrary()) {
           libraryLoaded = true;
-          const stillNeeded = libraryTracks.filter((t) => t._needsArtistLookup).length;
-          el.scanStatus.textContent =
-            stillNeeded > 0
-              ? `Restored — ${libraryTracks.length} songs, ${libraryTracks.length - stillNeeded} with artist info already, ${stillNeeded} still to check.`
-              : `Restored — ${libraryTracks.length} songs, all with artist info.`;
-          // If you're actually looking at the Artists list right now, don't
-          // leave it showing the pre-restore lineup until the next
-          // enrichment tick happens to refresh it.
-          if (!el.searchOverlay.classList.contains("hidden") && el.searchResults.querySelector("#artists-back-btn")) {
-            renderArtistsList();
-          }
-          kickOffArtistEnrichment(); // resumes whatever the backup left unfinished
+          el.scanStatus.textContent = `Restored — ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"}.`;
         } else {
           // Doesn't match the currently selected music folder — falls back
           // to a fresh scan next time the library is touched, same as

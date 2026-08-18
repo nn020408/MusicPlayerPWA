@@ -64,7 +64,7 @@
     <!-- Search overlay -->
     <div id="search-overlay" class="overlay hidden">
       <div class="overlay-header search-header">
-        <input id="search-input" type="text" placeholder="Search songs, artists, albums…" />
+        <input id="search-input" type="text" placeholder="Search songs…" />
         <button id="search-close-btn" class="text-btn">Cancel</button>
       </div>
       <div id="search-results" class="file-list"></div>
@@ -183,9 +183,7 @@
       </div>
       <div class="intro-panel hidden" data-panel="1">
         <h2>Building your library</h2>
-        <p>Next you'll pick the OneDrive folder your music lives in. After that, two things happen:</p>
-        <p><strong>First</strong>, a fast scan gets browsing, Search, and playback working almost right away.</p>
-        <p><strong>Then</strong>, a slower background pass reads the real artist info embedded in each song, so Search and the Artists tab are accurate. On a large library this can take a while — but it's one-time only, and you can keep using the app normally while it runs.</p>
+        <p>Next you'll pick the OneDrive folder your music lives in. The app scans it for songs so browsing, Search, and playback are ready to go — quick even for a large library, since it's just finding files, not reading each one.</p>
       </div>
       <div class="intro-panel hidden" data-panel="2">
         <h2>A quick warning about OneDrive</h2>
@@ -342,6 +340,12 @@
   <script src="js/vendor/capacitor-media-session.js"></script>
   <script src="js/vendor/capacitor-browser.js"></script>
   <script src="js/vendor/capacitor-app.js"></script>
+  <!-- Filesystem + Share: only used by exportBackup() (app.js) on Android,
+       where the plain web <a download> trick doesn't work — Android's
+       WebView doesn't reliably implement download-attribute handling for
+       blob: URLs the way a real browser does. -->
+  <script src="js/vendor/capacitor-filesystem.js"></script>
+  <script src="js/vendor/capacitor-share.js"></script>
   <script src="js/errorlog.js"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>

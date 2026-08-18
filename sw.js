@@ -2,7 +2,7 @@
 // We deliberately do NOT cache audio or Graph API responses since this app
 // is streaming-only by design (no offline playback).
 
-const CACHE_NAME = "musicplayer-shell-v100";
+const CACHE_NAME = "musicplayer-shell-v104";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -11,6 +11,8 @@ const SHELL_FILES = [
   "./js/vendor/capacitor-media-session.js",
   "./js/vendor/capacitor-browser.js",
   "./js/vendor/capacitor-app.js",
+  "./js/vendor/capacitor-filesystem.js",
+  "./js/vendor/capacitor-share.js",
   "./js/errorlog.js",
   "./js/config.js",
   "./js/auth.js",
