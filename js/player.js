@@ -107,6 +107,21 @@ let loadedTrackId = null; // id of the track audioEl.src actually corresponds to
 // happens to repeat.
 let playGeneration = 0;
 
+// Set true only when playback has genuinely given up after exhausting every
+// retry on a network-shaped failure (not a real "offline" event, which mobile
+// connections rarely fire cleanly — see the comment on retryWithBackoff's
+// caller in graph.js). The "online" listener below is what actually closes
+// the loop other apps (Spotify, YouTube) have and this one didn't: without
+// it, once the bounded retries above give up, nothing ever tries again on its
+// own, even once the connection genuinely comes back — it just stays silent
+// until you manually hit play.
+let playbackNeedsNetworkRecovery = false;
+window.addEventListener("online", () => {
+  if (!playbackNeedsNetworkRecovery) return;
+  playbackNeedsNetworkRecovery = false;
+  resumePlayback();
+});
+
 // Streaming URLs for the *next* track are fetched ahead of time (while the
 // current one is still playing, screen presumably on) so that advancing to
 // it when the current track ends needs no network wait — mobile browsers
@@ -199,7 +214,12 @@ let lastStateSaveAt = 0;
 // queue can be a whole folder or search result, and saving the raw Graph
 // items (with their long download URLs etc.) on every pause/tick would risk
 // the same localStorage-quota problem we already hit with the library cache.
-function savePlaybackState() {
+// overridePosition lets a caller record a position other than audioEl's
+// current one — playCurrent() uses this to save the *new* track immediately
+// on attempt, before audioEl.src has even been reassigned to it, so
+// audioEl.currentTime (still the previous track's position at that point)
+// never leaks into the new track's saved entry.
+function savePlaybackState(overridePosition) {
   const item = queue[queueIndex];
   if (!item) return;
   try {
@@ -208,7 +228,7 @@ function savePlaybackState() {
       JSON.stringify({
         queue: queue.map(slimTrack),
         queueIndex,
-        position: audioEl.currentTime || 0,
+        position: overridePosition != null ? overridePosition : audioEl.currentTime || 0,
         shuffleOn,
         repeatMode,
       })
@@ -308,6 +328,14 @@ async function playCurrent() {
   const resumeAt = hasPendingResume && queueIndex === pendingResumeIndex ? pendingResumePosition : 0;
   hasPendingResume = false;
 
+  // Recorded immediately, before we know whether this attempt actually
+  // succeeds — otherwise a track that fails to load (a network drop mid
+  // auto-advance, most commonly) leaves the on-disk state pointing at
+  // whatever the *previous* track was, since that was the last successful
+  // save. Reopening the app later would then show that stale earlier track
+  // instead of the one actually current when things broke.
+  savePlaybackState(resumeAt);
+
   // Kick off the cover-art fetch immediately, in parallel with the download
   // URL fetch below, instead of waiting until after playback starts — this
   // is what actually determines how fast the art appears in the UI.
@@ -352,7 +380,6 @@ async function playCurrent() {
         if (!url) throw new Error("No download URL returned by OneDrive for this file");
 
         audioEl.src = url;
-        loadedTrackId = item.id;
         // Safe to revoke now — audioEl.src was reassigned above, so nothing
         // still references the previous blob (if any).
         if (currentBlobUrl && currentBlobUrl !== usedBlobUrl) URL.revokeObjectURL(currentBlobUrl);
@@ -373,6 +400,20 @@ async function playCurrent() {
         // track while offline actually hits, since that track's URL is
         // usually already prefetched from before the connection dropped.
         await audioEl.play();
+        // Deliberately set only once .play() has actually resolved, not
+        // right after audioEl.src is assigned — resumePlayback() trusts
+        // loadedTrackId === current.id to mean "already good, just needs a
+        // nudge" and skips the full reload (so it also skips re-firing
+        // onTrackChange/updateMediaSessionMetadata below). Setting it earlier
+        // meant a track whose .play() call itself failed (exactly what
+        // happens retrying through a real network drop) still left
+        // loadedTrackId pointing at it — so the "online" listener's
+        // resumePlayback() call would see a false match, skip playCurrent()
+        // entirely, and call bare audioEl.play() instead: audio could end up
+        // actually resuming (if the network happened to be back by then)
+        // while the mini-player/notification stayed stuck on the previous
+        // track, since only playCurrent()'s own success path below updates them.
+        loadedTrackId = item.id;
       },
       {
         maxAttempts: 8,
@@ -423,12 +464,17 @@ async function playCurrent() {
     });
   } catch (err) {
     console.error("Playback failed", err);
-    const detail =
-      err && err.name === "NotAllowedError"
-        ? "browser blocked autoplay — tap play again"
-        : (err && err.message) || String(err);
+    const isAutoplayBlock = err && err.name === "NotAllowedError";
+    const detail = isAutoplayBlock ? "browser blocked autoplay — tap play again" : (err && err.message) || String(err);
     player.onStatus && player.onStatus(`Couldn't play "${item.name}": ${detail}`);
     setWantsToPlay(false); // every retry attempt (see retryWithBackoff above) already failed — nothing left to protect
+    // An autoplay block isn't a network problem — the connection is fine, the
+    // browser is just refusing to play without a fresh user gesture, and
+    // auto-resuming on "online" wouldn't have one either. Every other failure
+    // here (the overwhelming majority — getDownloadUrl/audioEl.play() both
+    // need live network) is exactly what the "online" listener above exists
+    // to recover from automatically.
+    if (!isAutoplayBlock) playbackNeedsNetworkRecovery = true;
   }
 }
 
@@ -629,6 +675,7 @@ audioEl.addEventListener("error", async () => {
         // silently no-op'ing on the still-broken element next time Play is pressed.
         loadedTrackId = null;
         setWantsToPlay(false); // genuinely given up — no point keeping the WebView pinned awake for this
+        playbackNeedsNetworkRecovery = true; // this whole branch only runs for network-shaped errors — see isNetworkError above
       }
     }
   } else {
@@ -718,6 +765,13 @@ audioEl.addEventListener("timeupdate", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") savePlaybackState();
 });
+// Belt-and-suspenders alongside visibilitychange above — Android WebViews
+// don't consistently fire the same lifecycle events for every way an app can
+// go away (backgrounding vs. being swiped out of Recents vs. the OS reclaiming
+// it under memory pressure aren't guaranteed to all hit the same listener),
+// and pagehide is the other one actually specified for "the page is going
+// away," so having both covers more of that surface than either alone.
+window.addEventListener("pagehide", () => savePlaybackState());
 
 function updateMediaSessionMetadata(item) {
   const title = item.name.replace(/\.[^/.]+$/, "");
