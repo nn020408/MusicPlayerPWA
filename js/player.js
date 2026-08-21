@@ -304,6 +304,26 @@ function setQueue(items, startIndex) {
   buildOrder(startIndex);
 }
 
+// Appends tracks to the END of the upcoming queue (after everything already
+// lined up), without disturbing what's currently playing — the standard
+// "Add to Queue" action, as opposed to setQueue() above which replaces
+// everything. Appending to playOrder rather than rebuilding it also means
+// this doesn't reshuffle whatever's already queued, shuffle on or not.
+// If nothing's playing/queued yet, there's nothing to append after, so this
+// just starts playing from the first added track instead — matching what
+// tapping any of them individually would do in that state.
+function addToQueue(tracks) {
+  if (!tracks || !tracks.length) return;
+  if (queue.length === 0) {
+    setQueue(tracks, 0);
+    playCurrent();
+    return;
+  }
+  const startLength = queue.length;
+  queue = queue.concat(tracks);
+  playOrder = playOrder.concat(tracks.map((_, i) => startLength + i));
+}
+
 function toggleShuffle() {
   shuffleOn = !shuffleOn;
   buildOrder(queueIndex);
@@ -491,14 +511,28 @@ async function playIndex(index) {
 // Resumes playback, recovering a stuck/stale audioEl first if needed —
 // loadedTrackId not matching the current queue item means audioEl doesn't
 // actually hold the track we think should be playing (e.g. a skip attempted
-// while offline never got past fetching the URL, or every retry above
-// already gave up). Calling .play() on whatever's stale in there is a
-// silent no-op either way; reloading via playCurrent() is the only thing
-// that can actually recover it.
+// while offline never got past fetching the URL). audioEl.error is the other
+// trigger: a mid-playback network drop is currently being retried in the
+// background (see the "error" listener below), and loadedTrackId still
+// matching in that state doesn't mean anything — the element is genuinely
+// broken right now regardless. Calling .play() on either is a silent no-op;
+// reloading via playCurrent() is the only thing that can actually recover it.
 function resumePlayback() {
   setWantsToPlay(true);
   const current = queue[queueIndex];
-  if (current && loadedTrackId !== current.id) {
+  if (current && (loadedTrackId !== current.id || audioEl.error)) {
+    if (audioEl.error) {
+      // Stash wherever we actually are (including anywhere just seeked to —
+      // see seekTo() below) so playCurrent()'s own resume logic picks it back
+      // up instead of restarting the track from 0. This also means tapping
+      // Play/dragging the seek bar while a background retry is already in
+      // flight supersedes it (playCurrent() mints a new playGeneration) and
+      // starts fresh immediately, instead of silently waiting out whatever's
+      // left of that retry's backoff schedule.
+      pendingResumeIndex = queueIndex;
+      pendingResumePosition = audioEl.currentTime;
+      hasPendingResume = true;
+    }
     playCurrent();
     return;
   }
@@ -512,6 +546,17 @@ function resumePlayback() {
 function userPause() {
   setWantsToPlay(false);
   audioEl.pause();
+  if (audioEl.error) {
+    // Currently mid-network-recovery — an explicit pause should actually
+    // stop it, not let a background retry silently resume playback later
+    // behind your back. Bumping playGeneration supersedes whatever retry is
+    // in flight (both retry loops check it before doing anything); the next
+    // isStillCurrent() check they hit just quietly no-ops instead of reviving
+    // playback. Also drops the stale "retrying" toast — you don't need to
+    // keep seeing that for something you just told it to stop.
+    ++playGeneration;
+    player.onStatus && player.onStatus("");
+  }
 }
 
 function playPause() {
@@ -589,6 +634,18 @@ function setUpcomingOrder(orderedQueueIndices) {
 
 function seekTo(seconds) {
   audioEl.currentTime = seconds;
+  if (audioEl.error) {
+    // Broken/mid-network-recovery — setting currentTime above on a genuinely
+    // errored element isn't reliable on its own, so make the seek actually
+    // count: force an immediate fresh reconnect at this position via
+    // resumePlayback() (which stashes it for playCurrent() to pick up)
+    // instead of leaving it to a backoff retry that might not check in again
+    // for up to another 30s, and drop the stale "retrying" toast since
+    // dragging the seek bar is a clear enough sign you're here and want this
+    // to work now.
+    player.onStatus && player.onStatus("");
+    resumePlayback();
+  }
 }
 
 // Clears all in-memory playback state — used on sign-out so the mini-player

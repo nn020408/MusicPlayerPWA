@@ -375,6 +375,12 @@ body.audio-paused .row-icon.playing .bar {
 }
 .select-bar .select-count { font-size: 13px; font-weight: 600; flex: 1; }
 .select-bar-actions { display: flex; gap: 8px; }
+/* Tighter than the global .secondary-btn/.primary-btn padding — this row now
+   holds three buttons plus the count label in the same fixed-width bar, and
+   the default padding (especially .primary-btn's 28px sides) was sized for
+   one or two buttons, not three. */
+.select-bar-actions .secondary-btn,
+.select-bar-actions .primary-btn { padding: 10px 14px; font-size: 13px; white-space: nowrap; }
 
 @media (prefers-reduced-motion: reduce) {
   .row::before, .row.just-selected { animation: none !important; transition: none !important; }

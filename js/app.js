@@ -23,6 +23,7 @@ const el = {
   selectActionBar: document.getElementById("select-action-bar"),
   selectCountLabel: document.getElementById("select-count-label"),
   selectAddPlaylistBtn: document.getElementById("select-add-playlist-btn"),
+  selectAddQueueBtn: document.getElementById("select-add-queue-btn"),
   selectShuffleBtn: document.getElementById("select-shuffle-btn"),
 
   searchOverlay: document.getElementById("search-overlay"),
@@ -118,6 +119,7 @@ const el = {
   folderActionsModal: document.getElementById("folder-actions-modal"),
   folderActionsTitle: document.getElementById("folder-actions-title"),
   folderPlayBtn: document.getElementById("folder-play-btn"),
+  folderAddQueueBtn: document.getElementById("folder-add-queue-btn"),
   folderAddPlaylistBtn: document.getElementById("folder-add-playlist-btn"),
   folderActionsCancelBtn: document.getElementById("folder-actions-cancel-btn"),
 
@@ -399,6 +401,25 @@ el.selectAddPlaylistBtn.addEventListener("click", async () => {
       return;
     }
     openAddToPlaylistModal(tracks); // already accepts an array — see app.js above
+  } catch (err) {
+    console.error(err);
+    exitSelectMode();
+    showToast("Couldn't load that selection");
+  }
+});
+
+el.selectAddQueueBtn.addEventListener("click", async () => {
+  const selectionCount = selectedItems.size;
+  showToast(`Loading ${selectionCount} selection${selectionCount === 1 ? "" : "s"}…`);
+  try {
+    const tracks = await resolveSelectedTracks();
+    exitSelectMode();
+    if (tracks.length === 0) {
+      showToast("No songs found in that selection");
+      return;
+    }
+    addToQueue(tracks);
+    showToast(`Added ${tracks.length} song${tracks.length === 1 ? "" : "s"} to queue`);
   } catch (err) {
     console.error(err);
     exitSelectMode();
@@ -1144,6 +1165,25 @@ el.folderPlayBtn.addEventListener("click", async () => {
     if (!shuffleOn) toggleShuffle();
     playCurrent();
     showToast(`Shuffling ${tracks.length} song${tracks.length === 1 ? "" : "s"} from "${folder.name}"`);
+  } catch (err) {
+    console.error(err);
+    showToast("Couldn't load that folder's songs");
+  }
+});
+
+el.folderAddQueueBtn.addEventListener("click", async () => {
+  el.folderActionsModal.classList.add("hidden");
+  const folder = pendingFolderForActions;
+  if (!folder) return;
+  showToast(`Loading songs from "${folder.name}"…`);
+  try {
+    const tracks = await collectTracksRecursive(folder.id);
+    if (tracks.length === 0) {
+      showToast("No songs found in that folder");
+      return;
+    }
+    addToQueue(tracks);
+    showToast(`Added ${tracks.length} song${tracks.length === 1 ? "" : "s"} to queue`);
   } catch (err) {
     console.error(err);
     showToast("Couldn't load that folder's songs");
@@ -2384,6 +2424,10 @@ function handleBackPress() {
   }
   if (!el.playlistActionsModal.classList.contains("hidden")) {
     el.playlistActionsModal.classList.add("hidden");
+    return true;
+  }
+  if (!el.folderActionsModal.classList.contains("hidden")) {
+    el.folderActionsModal.classList.add("hidden");
     return true;
   }
   if (!el.upNextOverlay.classList.contains("hidden")) {
