@@ -19,6 +19,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Must be registered before super.onCreate builds the bridge.
+        registerPlugin(IndexKeepAlivePlugin.class);
         super.onCreate(savedInstanceState);
 
         // Required on Android 13+ to actually display the persistent playback
