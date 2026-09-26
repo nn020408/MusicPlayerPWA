@@ -226,7 +226,7 @@ function savePlaybackState(overridePosition) {
     localStorage.setItem(
       PLAYBACK_STATE_KEY,
       JSON.stringify({
-        queue: queue.map((t) => slimTrack(t)),
+        queue: queue.map(slimTrack),
         queueIndex,
         position: overridePosition != null ? overridePosition : audioEl.currentTime || 0,
         shuffleOn,

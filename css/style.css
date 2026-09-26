@@ -86,8 +86,7 @@ button { font-family: inherit; }
 }
 
 /* Login */
-#login-screen,
-#loading-screen {
+#login-screen {
   align-items: center;
   justify-content: center;
   text-align: center;
@@ -96,16 +95,6 @@ button { font-family: inherit; }
 .login-box h1 { margin-bottom: 4px; }
 .login-box p { color: var(--text-dim); margin-bottom: 24px; }
 .login-version { margin-top: 20px; margin-bottom: 0; }
-/* Larger, standalone variant of the inline .spinner used in status text
-   elsewhere — this one's the sole content of the boot loading screen, not
-   sitting next to a line of text, so it reads better bigger and centered
-   with a bit of space below the app name instead of inline-sized. */
-.spinner-lg {
-  width: 28px;
-  height: 28px;
-  border-width: 3px;
-  margin: 20px auto 0;
-}
 
 .primary-btn {
   background: var(--accent);
@@ -369,6 +358,7 @@ body.audio-paused .row-icon.playing .bar {
 /* Same fixed slot the mini player occupies — the two are never shown at
    once (app.js toggles this class on #now-playing-bar while selecting). */
 #now-playing-bar.select-mode-hidden { display: none; }
+body.settings-open #now-playing-bar { display: none; }
 
 .select-bar {
   position: fixed;
@@ -483,25 +473,6 @@ body.audio-paused .row-icon.playing .bar {
 .settings-row { margin: 4px 0; }
 .settings-hint { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
 .settings-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
-.section-title {
-  padding: 14px 16px 6px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-/* Indexing progress line above search home / Artists / results. Hides itself
-   when there's nothing to say (every song read). */
-.index-banner {
-  padding: 10px 16px;
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-}
-.index-banner:empty { display: none; }
-.index-banner .text-btn { padding: 2px 6px; }
 
 .playlists-new-btn { margin: 12px 16px; }
 
