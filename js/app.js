@@ -1,6 +1,7 @@
 // Wires the UI to auth, the library index, playlists, and the player.
 
 const el = {
+  loadingScreen: document.getElementById("loading-screen"),
   loginScreen: document.getElementById("login-screen"),
   appScreen: document.getElementById("app-screen"),
   signInBtn: document.getElementById("sign-in-btn"),
@@ -549,6 +550,7 @@ function openFolderActionsModal(folder) {
 }
 
 async function openFolder(folderId, pushToStack, folderName) {
+  indexPriorityFolderId = folderId; // the indexer reads what you are looking at first
   // Selection is scoped to whatever folder is currently shown (see
   // currentFolders/currentTracks below) — navigating away would leave it
   // pointing at rows that no longer exist, so just close it out first.
@@ -656,12 +658,60 @@ async function ensureLibraryLoaded() {
   }
   if (loadCachedLibrary()) {
     libraryLoaded = true;
+    kickOffIndexing(); // picks up wherever a previous session left off
     return;
   }
   libraryLoadPromise = rescanLibrary().finally(() => {
     libraryLoadPromise = null;
   });
   await libraryLoadPromise;
+}
+
+// ---------- Artist indexing (js/indexer.js) ----------
+// Fire-and-forget: never awaited by whatever triggers it. startIndexing()
+// itself no-ops if it's already running or a scan is in progress, so every
+// "library just became available" path (cache hit, fresh scan, restore) can
+// call this without coordinating.
+let indexState = "idle"; // idle | running | done | stopped | datasaver
+
+function kickOffIndexing(force) {
+  updateRescanButtonUI();
+  startIndexing({ force, onProgress: onIndexProgress }).finally(updateRescanButtonUI);
+}
+
+function onIndexProgress({ done, total, state }) {
+  indexState = state;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  if (state === "running") {
+    el.scanStatus.textContent = `Reading artist names in the background… ${done} of ${total} songs (${pct}%)`;
+  } else if (state === "done") {
+    el.scanStatus.textContent =
+      done >= total
+        ? `Artists ready — all ${total} songs indexed.`
+        : `Artists read for ${done} of ${total} songs. The rest will be retried next time you open the app.`;
+  } else if (state === "stopped") {
+    el.scanStatus.textContent = `Artist indexing stopped at ${pct}%. It resumes next time you open the app, or tap Resume in Search > Artists.`;
+  } else if (state === "datasaver") {
+    el.scanStatus.textContent = "Artist indexing is paused because data saver is on. Tap Resume in Search > Artists to run it anyway.";
+  }
+  updateIndexBanner();
+  refreshVisibleRowArtists();
+}
+
+// Songs already on screen in the folder view were drawn before their artist
+// was known — fill the artist line in as it arrives instead of making you
+// reopen the folder.
+function refreshVisibleRowArtists() {
+  const rows = el.fileList.querySelectorAll(".track-row");
+  if (!rows.length) return;
+  const byId = new Map(libraryTracks.map((t) => [t.id, t]));
+  rows.forEach((row) => {
+    if (row.querySelector(".row-sub")) return;
+    const track = byId.get(row.dataset.trackId);
+    const artist = track && track.audio && track.audio.artist;
+    const text = row.querySelector(".row-text");
+    if (artist && text) text.insertAdjacentHTML("beforeend", `<div class="row-sub">${escapeHtml(artist)}</div>`);
+  });
 }
 
 // Cancels an in-progress scan and waits for it to actually wind down
@@ -677,12 +727,12 @@ async function stopLibraryWorkAndWait() {
   }
 }
 
-// Settings' "Rescan library" button doubles as a Stop control while a scan is
-// actively running — same button, same slot, since the two states are
-// mutually exclusive from the user's point of view.
+// Settings' "Rescan library" button doubles as a Stop control while a scan or
+// artist indexing is actively running — same button, same slot, since the
+// states are mutually exclusive from the user's point of view.
 function updateRescanButtonUI() {
   const active = isLibraryWorkActive();
-  el.rescanLibraryBtn.textContent = active ? "⏹ Stop scanning" : "Rescan library";
+  el.rescanLibraryBtn.textContent = isScanning ? "⏹ Stop scanning" : isIndexing ? "⏹ Stop indexing" : "Rescan library";
   el.rescanLibraryBtn.classList.toggle("danger", active);
 }
 
@@ -714,9 +764,10 @@ async function rescanLibrary() {
     const doneMsg = `Done — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found.`;
     el.scanStatus.textContent = doneMsg;
     if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) {
-      el.searchResults.innerHTML = "";
+      renderSearchHome();
     }
     showToast(`Search ready — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found`);
+    kickOffIndexing();
   } catch (err) {
     console.error(err);
     el.scanStatus.textContent = "Scan failed: " + (err.message || err);
@@ -1235,7 +1286,14 @@ el.shuffleViewBtn.addEventListener("click", async () => {
   }
 });
 
-// ---------- Search (song names only for now — see the note at the top of library.js) ----------
+// ---------- Search: songs and artists, grouped like Spotify ----------
+// One box matches song name and artist (accent-insensitive, any word order).
+// Results come in sections: matching artists first, then songs. With nothing
+// typed, the Artists view is one tap away, with an honest indexing progress
+// line while artist names are still being read in the background.
+const SEARCH_SONG_LIMIT = 200;
+let searchView = "home"; // home | artists | results — what "Refresh" should redraw
+
 el.searchBtn.addEventListener("click", async () => {
   el.searchOverlay.classList.remove("hidden");
   el.searchInput.value = "";
@@ -1246,6 +1304,7 @@ el.searchBtn.addEventListener("click", async () => {
     // live progress here now, same text as Settings, since the overlay is open.
     await ensureLibraryLoaded();
   }
+  if (libraryLoaded && !el.searchInput.value.trim()) renderSearchHome();
 });
 el.searchCloseBtn.addEventListener("click", () => el.searchOverlay.classList.add("hidden"));
 let searchDebounceTimer = null;
@@ -1254,24 +1313,120 @@ el.searchInput.addEventListener("input", () => {
   searchDebounceTimer = setTimeout(runSearch, 150);
 });
 
+// Shown above search home / the Artists view / results while indexing isn't
+// finished. Empty string (and the element hides itself via :empty) once every
+// song has been read.
+function indexBannerHtml() {
+  const { done, total } = indexCounts();
+  if (!total || done >= total) return "";
+  const pct = Math.round((done / total) * 100);
+  const nums = `${done.toLocaleString()} of ${total.toLocaleString()} songs (${pct}%)`;
+  if (isIndexing) {
+    return `Reading artist names… ${nums} <button class="text-btn accent" data-act="refresh">Refresh</button>`;
+  }
+  return `Artist indexing paused: ${nums} <button class="text-btn accent" data-act="resume">Resume</button>`;
+}
+
+function updateIndexBanner() {
+  const banner = document.getElementById("index-banner");
+  if (banner) banner.innerHTML = indexBannerHtml();
+}
+
+function artistRowHtml(a) {
+  return `<div class="row" data-artist-key="${encodeURIComponent(a.key)}">
+    <span class="row-icon">🎤</span>
+    <div class="row-text"><div class="row-name">${escapeHtml(a.name)}</div><div class="row-sub">${a.count} song${a.count === 1 ? "" : "s"}</div></div>
+  </div>`;
+}
+
+function renderSearchHome() {
+  searchView = "home";
+  const n = getArtists().length;
+  const sub = n ? `${n.toLocaleString()} artist${n === 1 ? "" : "s"}` : "Filling in as songs are read";
+  el.searchResults.innerHTML = `<div id="index-banner" class="index-banner">${indexBannerHtml()}</div>
+    <div class="row" data-act="artists">
+      <span class="row-icon">🎤</span>
+      <div class="row-text"><div class="row-name">Artists</div><div class="row-sub">${sub}</div></div>
+    </div>`;
+}
+
+function renderArtistsView() {
+  searchView = "artists";
+  const artists = getArtists();
+  el.searchResults.innerHTML = `<div class="toolbar"><button class="text-btn" data-act="back">‹ Back</button></div>
+    <div id="index-banner" class="index-banner">${indexBannerHtml()}</div>
+    ${artists.length ? artists.map(artistRowHtml).join("") : `<p class="status-msg">No artists yet. They appear as songs are read.</p>`}`;
+  el.searchResults.scrollTop = 0;
+}
+
+function openArtist(key) {
+  const artist = getArtists().find((a) => a.key === key);
+  openDetailList(artist ? artist.name : key, songsByArtistKey(key));
+}
+
+// One listener for everything in the results pane that isn't a song row
+// (song rows carry their own handlers from trackRow()).
+el.searchResults.addEventListener("click", (e) => {
+  const target = e.target.closest("[data-act], [data-artist-key]");
+  if (!target) return;
+  if (target.dataset.artistKey) {
+    openArtist(decodeURIComponent(target.dataset.artistKey));
+    return;
+  }
+  const act = target.dataset.act;
+  if (act === "artists") renderArtistsView();
+  else if (act === "back") renderSearchHome();
+  else if (act === "resume") kickOffIndexing(true);
+  else if (act === "refresh") {
+    if (searchView === "artists") renderArtistsView();
+    else if (searchView === "home") renderSearchHome();
+    else runSearch();
+  }
+});
+
 function runSearch() {
   const query = el.searchInput.value;
-  const results = searchLibrary(query);
-  el.searchResults.innerHTML = "";
-  if (query.trim() && results.length === 0) {
-    el.searchResults.innerHTML = `<p class="status-msg">No matches.</p>`;
+  if (!query.trim()) {
+    if (libraryLoaded) renderSearchHome();
+    else el.searchResults.innerHTML = "";
+    return;
   }
-  results.forEach((track, index) => {
-    el.searchResults.appendChild(
-      trackRow(track, {
-        onPlay: () => {
-          setQueue(results, index);
-          playCurrent();
-        },
-        onMenu: () => openAddToPlaylistModal(track),
-      })
+  searchView = "results";
+  const artists = searchArtists(query).slice(0, 5);
+  const songs = searchLibrary(query);
+  const { done, total } = indexCounts();
+  el.searchResults.innerHTML = "";
+
+  if (total > 0 && done < total) {
+    el.searchResults.insertAdjacentHTML(
+      "beforeend",
+      `<div id="index-banner" class="index-banner">Artist info is still loading (${done.toLocaleString()} of ${total.toLocaleString()} songs), so artist results may be incomplete. <button class="text-btn accent" data-act="refresh">Search again</button></div>`
     );
-  });
+  }
+  if (!artists.length && !songs.length) {
+    el.searchResults.insertAdjacentHTML("beforeend", `<p class="status-msg">No matches.</p>`);
+    return;
+  }
+  if (artists.length) {
+    el.searchResults.insertAdjacentHTML("beforeend", `<div class="section-title">Artists</div>${artists.map(artistRowHtml).join("")}`);
+  }
+  if (songs.length) {
+    el.searchResults.insertAdjacentHTML("beforeend", `<div class="section-title">Songs (${songs.length.toLocaleString()})</div>`);
+    songs.slice(0, SEARCH_SONG_LIMIT).forEach((track, index) => {
+      el.searchResults.appendChild(
+        trackRow(track, {
+          onPlay: () => {
+            setQueue(songs, index);
+            playCurrent();
+          },
+          onMenu: () => openAddToPlaylistModal(track),
+        })
+      );
+    });
+    if (songs.length > SEARCH_SONG_LIMIT) {
+      el.searchResults.insertAdjacentHTML("beforeend", `<p class="status-msg">Showing the first ${SEARCH_SONG_LIMIT} songs. Type more to narrow it down.</p>`);
+    }
+  }
 }
 
 // ---------- Settings ----------
@@ -1462,6 +1617,7 @@ function importBackupFile(file, onDone) {
         if (loadCachedLibrary()) {
           libraryLoaded = true;
           el.scanStatus.textContent = `Restored — ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"}.`;
+          kickOffIndexing();
         } else {
           // Doesn't match the currently selected music folder — falls back
           // to a fresh scan next time the library is touched, same as
@@ -2483,6 +2639,11 @@ function handleBackPress() {
     return true;
   }
   if (!el.searchOverlay.classList.contains("hidden")) {
+    // Artists view is one level inside Search — step back out of it first.
+    if (searchView === "artists") {
+      renderSearchHome();
+      return true;
+    }
     el.searchOverlay.classList.add("hidden");
     return true;
   }
@@ -2560,6 +2721,7 @@ function showRestoredTrackDisplay(item) {
 
 // ---------- Auth / boot ----------
 function showApp() {
+  el.loadingScreen.classList.add("hidden");
   el.loginScreen.classList.add("hidden");
   el.appScreen.classList.remove("hidden");
   pushBackGuard();
@@ -2611,6 +2773,7 @@ function getSavedFolderPath() {
 }
 
 function showLogin() {
+  el.loadingScreen.classList.add("hidden");
   el.loginScreen.classList.remove("hidden");
   el.appScreen.classList.add("hidden");
 }
@@ -2664,10 +2827,19 @@ el.signOutBtn.addEventListener("click", async () => {
 ensureFavoritesPlaylist(); // local-only, no auth needed — safe before sign-in even resolves
 
 (async function init() {
-  const account = await initAuth();
-  if (account) {
-    showApp();
-  } else {
+  try {
+    const account = await initAuth();
+    if (account) {
+      showApp();
+    } else {
+      showLogin();
+    }
+  } catch (err) {
+    // #loading-screen is what's visible by default now (see index.html) — a
+    // rejection here with no catch would otherwise leave it showing forever
+    // with no button and no way out, which is strictly worse than the old
+    // default-visible login screen this replaced.
+    console.error("Failed to check sign-in state", err);
     showLogin();
   }
 })();

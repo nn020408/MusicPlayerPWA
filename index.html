@@ -28,7 +28,21 @@
 </head>
 <body class="audio-paused">
 
-  <section id="login-screen" class="screen">
+  <!-- Shown by default (see #login-screen below starting hidden) for exactly
+       as long as init() (app.js) takes to check whether a Microsoft account
+       is already signed in — without this, the login screen itself was what
+       painted first on every cold start (and every reload the OS forces
+       after reclaiming a backgrounded WebView's memory), flashing "sign in"
+       for a moment even when you're already connected, before flipping to
+       the real app once the check resolved. -->
+  <section id="loading-screen" class="screen">
+    <div class="login-box">
+      <h1>NubePlayer</h1>
+      <span class="spinner spinner-lg"></span>
+    </div>
+  </section>
+
+  <section id="login-screen" class="screen hidden">
     <div class="login-box">
       <h1>NubePlayer</h1>
       <p>Stream your music straight from OneDrive.</p>
@@ -64,7 +78,7 @@
     <!-- Search overlay -->
     <div id="search-overlay" class="overlay hidden">
       <div class="overlay-header search-header">
-        <input id="search-input" type="text" placeholder="Search songs…" />
+        <input id="search-input" type="text" placeholder="Search songs or artists…" />
         <button id="search-close-btn" class="text-btn">Cancel</button>
       </div>
       <div id="search-results" class="file-list"></div>
@@ -184,7 +198,8 @@
       </div>
       <div class="intro-panel hidden" data-panel="1">
         <h2>Building your library</h2>
-        <p>Next you'll pick the OneDrive folder your music lives in. The app scans it for songs so browsing, Search, and playback are ready to go — quick even for a large library, since it's just finding files, not reading each one.</p>
+        <p>Next you'll pick the OneDrive folder your music lives in. The app scans it for songs so browsing, Search, and playback are ready right away.</p>
+        <p>Then, in the background, it reads the artist name stored inside each song so you can search by artist too. That's a one-time job of a few minutes for a big library. It runs while the app is open, starts with the folder you're looking at, and you can stop it anytime in Settings.</p>
       </div>
       <div class="intro-panel hidden" data-panel="2">
         <h2>A quick warning about OneDrive</h2>
@@ -355,6 +370,7 @@
   <script src="js/library.js"></script>
   <script src="js/playlists.js"></script>
   <script src="js/id3.js"></script>
+  <script src="js/indexer.js"></script>
   <script src="js/player.js"></script>
   <script src="js/app.js"></script>
 </body>
