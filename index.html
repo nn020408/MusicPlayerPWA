@@ -201,7 +201,8 @@
       <div class="intro-panel hidden" data-panel="1">
         <h2>Building your library</h2>
         <p>Next you'll pick the OneDrive folder your music lives in. The app scans it for songs so browsing, Search, and playback are ready right away.</p>
-        <p>Then, in the background, it reads the artist name stored inside each song so you can search by artist too. That's a one-time job of a few minutes for a big library. It runs while the app is open, starts with the folder you're looking at, and you can stop it anytime in Settings.</p>
+        <p>Then, in the background, it reads the artist name stored inside each song so you can search by artist too. On Android this keeps going with the screen off (you'll see a small "reading your library" notification), starts with the folder you're looking at, and you can stop it anytime in Settings.</p>
+        <p>Faster shortcut: if your music also lives on a PC, the PC tool in the project's tools folder (scan-artists.js) reads every artist from the local files and saves a small nubeplayer-artists.json into your music folder. OneDrive syncs it, and the app fills in almost every artist from that one file in seconds instead of minutes. It's optional — without it the app just reads the songs itself.</p>
       </div>
       <div class="intro-panel hidden" data-panel="2">
         <h2>A quick warning about OneDrive</h2>
