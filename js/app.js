@@ -678,7 +678,11 @@ let indexState = "idle"; // idle | running | done | stopped | datasaver
 
 function kickOffIndexing(force) {
   updateRescanButtonUI();
-  startIndexing({ force, onProgress: onIndexProgress }).finally(updateRescanButtonUI);
+  // First fill in whatever the PC-made artists file knows (one small download),
+  // then let the background indexer read only what's still missing.
+  syncArtistsFile()
+    .then(() => startIndexing({ force, onProgress: onIndexProgress }))
+    .finally(updateRescanButtonUI);
 }
 
 // Indexing waits in the background (Android stalls the network there). Pick it

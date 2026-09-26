@@ -14,6 +14,9 @@ const LIBRARY_CACHE_KEY = "libraryIndexCache";
 const DEFAULT_FOLDER_KEY = "defaultFolderPath"; // shared with the Folders tab's "default folder" setting
 
 let libraryTracks = [];
+// folderId -> path relative to the library root ("" for the root itself),
+// recorded by scanLibrary() so songs can be matched to the PC-made artists file.
+let libraryFolderPaths = {};
 let isScanning = false;
 let isIndexing = false; // owned by js/indexer.js; declared here so stop/active checks below can see it
 
@@ -54,6 +57,7 @@ function loadCachedLibrary() {
     if (parsed.version !== LIBRARY_CACHE_VERSION) return false; // old format — force a fresh scan
     if (parsed.rootId !== getLibraryRootId()) return false; // stale — root folder changed
     libraryTracks = parsed.tracks;
+    libraryFolderPaths = parsed.folderPaths || {};
     invalidateArtistsCache();
     return true;
   } catch {
@@ -65,7 +69,7 @@ function cacheLibrary(rootId) {
   try {
     localStorage.setItem(
       LIBRARY_CACHE_KEY,
-      JSON.stringify({ rootId, tracks: libraryTracks, scannedAt: Date.now(), version: LIBRARY_CACHE_VERSION })
+      JSON.stringify({ rootId, tracks: libraryTracks, folderPaths: libraryFolderPaths, scannedAt: Date.now(), version: LIBRARY_CACHE_VERSION })
     );
     return true;
   } catch (err) {
@@ -81,6 +85,8 @@ function cacheLibrary(rootId) {
 function resetLibrary() {
   localStorage.removeItem(LIBRARY_CACHE_KEY);
   libraryTracks = [];
+  libraryFolderPaths = {};
+  artistsFileSync = null;
   invalidateArtistsCache();
 }
 
@@ -191,6 +197,7 @@ async function scanLibrary(onProgress) {
   // keeps them instead of forcing the whole indexing pass to start over.
   const prior = new Map(libraryTracks.filter((t) => t.indexed).map((t) => [t.id, (t.audio && t.audio.artist) || ""]));
   const tracks = [];
+  const folderPaths = { [rootId]: "" };
   let foldersScanned = 0;
 
   async function handleFolder(folderId) {
@@ -205,6 +212,8 @@ async function scanLibrary(onProgress) {
       },
     });
     for (const t of folderTracks) tracks.push(makeTrack(t, folderId, prior));
+    const here = folderPaths[folderId];
+    for (const f of folders) folderPaths[f.id] = here ? `${here}/${f.name}` : f.name;
     foldersScanned++;
     onProgress && onProgress(foldersScanned, tracks.length);
     return signal.aborted ? [] : folders.map((f) => f.id);
@@ -217,6 +226,8 @@ async function scanLibrary(onProgress) {
     // silently replace it with a partial folder tree.
     if (!signal.aborted) {
       libraryTracks = tracks;
+      libraryFolderPaths = folderPaths;
+      artistsFileSync = null; // a new scan may have new songs the file can fill in
       invalidateArtistsCache();
       const cached = cacheLibrary(rootId);
       if (!cached) {
@@ -228,6 +239,76 @@ async function scanLibrary(onProgress) {
     scanAbortController = null;
   }
   return libraryTracks;
+}
+
+// ---------- Artists file (made on the PC) ----------
+//
+// tools/scan-artists.js reads every tag from the local copy of the library and
+// writes nubeplayer-artists.json into the library's root folder; OneDrive syncs
+// it. One download here fills in nearly every artist at once, instead of
+// reading thousands of files over the network. It is only ever a shortcut:
+// missing, stale or unreadable, the background indexer reads whatever is left.
+
+// Applies the file's { "folder/song.mp3": "Artist" } entries to songs not yet
+// read. An empty artist means "the file has no tag", which also counts as read.
+// Matched by folder path + file name, so the same song name in two folders can't
+// get mixed up. Returns { applied, none, missing }.
+function applyArtistsFile(data) {
+  if (!data || data.version !== 2 || !data.files || typeof data.files !== "object") throw new Error("unrecognised artists file");
+  const known = new Map();
+  for (const [p, artist] of Object.entries(data.files)) known.set(normalizeText(p), typeof artist === "string" ? artist.trim() : "");
+  let applied = 0;
+  let none = 0;
+  let missing = 0;
+  for (const t of libraryTracks) {
+    if (t.indexed) continue;
+    const dir = libraryFolderPaths[t.folderId];
+    const key = dir === undefined ? null : normalizeText(dir ? `${dir}/${t.name}` : t.name);
+    if (key === null || !known.has(key)) {
+      missing++;
+      continue;
+    }
+    const artist = known.get(key);
+    t.indexed = true;
+    if (artist) {
+      t.audio = { artist };
+      applied++;
+    } else {
+      none++;
+    }
+    t._searchText = buildSearchText(t.name, artist);
+  }
+  invalidateArtistsCache();
+  return { applied, none, missing };
+}
+
+// Downloads and applies the file, once per library scan/session. Resolves to
+// applyArtistsFile's counts, or null when there was nothing to do or no file.
+// Never throws: any problem just leaves the songs for the background indexer.
+let artistsFileSync = null;
+
+function syncArtistsFile() {
+  if (artistsFileSync) return artistsFileSync;
+  if (!libraryTracks.some((t) => !t.indexed) || !Object.keys(libraryFolderPaths).length) return Promise.resolve(null);
+  const attempt = (async () => {
+    try {
+      const listing = await listFolder(getLibraryRootId(), { priority: "low" });
+      const item = listing.artistsFile;
+      if (!item) return null; // no file: nothing to do (and nothing to retry)
+      let res = await fetch(item["@microsoft.graph.downloadUrl"] || "");
+      if (!res.ok) res = await fetch(await refreshDownloadUrl(item.id, { silent: true })); // link may have expired
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const result = applyArtistsFile(await res.json());
+      if (result.applied || result.none) cacheLibrary(getLibraryRootId());
+      return result;
+    } catch (err) {
+      console.warn("Artists file not used", err);
+      artistsFileSync = null; // might be a passing network problem: allow another try
+      return null;
+    }
+  })();
+  artistsFileSync = attempt;
+  return attempt;
 }
 
 // ---------- Search ----------

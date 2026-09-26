@@ -1,0 +1,5 @@
+{
+  "name": "nubeplayer-tools",
+  "private": true,
+  "dependencies": { "music-metadata": "^11.0.0" }
+}

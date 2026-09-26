@@ -48,6 +48,10 @@ async function graphGet(pathOrUrl, { priority } = {}) {
 // Stores the in-flight PROMISE so concurrent callers share one request.
 const folderListCache = new Map();
 
+// Written by tools/scan-artists.js on the PC into the library's root folder
+// and synced by OneDrive: every song's artist, read from the local files.
+const ARTISTS_FILE_NAME = "nubeplayer-artists.json";
+
 function clearFolderListCache() {
   folderListCache.clear();
 }
@@ -80,7 +84,11 @@ function listFolder(folderId, { priority } = {}) {
       .filter((i) => i.file && i.file.mimeType && i.file.mimeType.startsWith("audio/"))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    return { folders, tracks };
+    // The artists file, if this folder has one: lets library.js fetch it
+    // without a second listing.
+    const artistsFile = items.find((i) => i.file && i.name === ARTISTS_FILE_NAME) || null;
+
+    return { folders, tracks, artistsFile };
   })();
 
   folderListCache.set(folderId, promise);
