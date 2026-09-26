@@ -431,11 +431,10 @@ el.selectAddQueueBtn.addEventListener("click", async () => {
 });
 
 // ---------- Reusable track row ----------
-// Lists stay fast: only shows an artist line when OneDrive already gave us
-// one for free as part of the folder listing (no extra fetch). When it's
-// missing, we just omit the line instead of showing a placeholder on every
-// row — the real tag is read (for the currently playing track only) in
-// id3.js, see player.onRealTags.
+// Lists stay fast: the artist line comes from the library index (the
+// background artist read), never a per-row fetch. When a song's artist isn't
+// known (yet, or its file has no tag) the line is simply omitted rather than
+// showing a placeholder on every row.
 const EQUALIZER_ICON = `<span class="row-icon playing"><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>`;
 const NOTE_ICON = `<span class="row-icon">🎵</span>`;
 
@@ -447,7 +446,7 @@ function trackRow(track, { onPlay, onMenu, selectable = false, reorderable = fal
   const isPlaying = !!(queue[queueIndex] && queue[queueIndex].id === track.id);
   row.className = "row track-row" + (isPlaying ? " now-playing-row" : "");
   row.dataset.trackId = track.id;
-  const artist = track.audio && track.audio.artist;
+  const artist = (track.audio && track.audio.artist) || libraryArtistFor(track.id);
   const key = selectKey("track", track.id);
   row.innerHTML = `
     <span class="row-lead">
@@ -2174,7 +2173,7 @@ function renderUpNextNowPlaying() {
   el.upNextNowLabel.classList.toggle("hidden", !hasCurrent);
   el.upNextNowRow.classList.toggle("hidden", !hasCurrent);
   if (!hasCurrent) return;
-  const artist = current.audio && current.audio.artist;
+  const artist = (current.audio && current.audio.artist) || libraryArtistFor(current.id);
   el.upNextNowRow.innerHTML = `
     <span class="row-lead">${EQUALIZER_ICON}</span>
     <div class="row-text">

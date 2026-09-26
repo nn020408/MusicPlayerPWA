@@ -352,8 +352,21 @@ function creditedArtists(raw) {
 }
 
 let artistsCache = null;
+let artistByIdCache = null;
 function invalidateArtistsCache() {
   artistsCache = null;
+  artistByIdCache = null;
+}
+
+// The artist for a song id, straight from the library ("" if unknown or not
+// read yet). Lists built from a raw OneDrive folder listing don't carry the
+// artist on their track objects, so rows look it up here.
+function libraryArtistFor(id) {
+  if (!artistByIdCache) {
+    artistByIdCache = new Map();
+    for (const t of libraryTracks) if (t.audio && t.audio.artist) artistByIdCache.set(t.id, t.audio.artist);
+  }
+  return artistByIdCache.get(id) || "";
 }
 
 // [{key, name, count}] sorted by name. Each song counts under every artist

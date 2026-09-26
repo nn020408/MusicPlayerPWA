@@ -242,10 +242,17 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 .row:active { background: var(--surface); }
+/* Pressing and holding a song used to select its name (blue handles, "Copy"
+   bubble) on top of the app's own long-press gesture. Rows are for tapping, not copying. */
+.row, .row *, #now-playing-bar, #now-playing-bar *, #full-player, #full-player * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
 .row-icon { font-size: 20px; flex-shrink: 0; }
 .row-text { flex: 1; overflow: hidden; }
 .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-sub { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-sub { font-size: 12.5px; line-height: 1.3; margin-top: 1px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* "Now playing" row indicator — small bouncing equalizer bars + accent text,
    similar to how most music apps mark the active track in a list. */
