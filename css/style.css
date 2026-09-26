@@ -459,6 +459,11 @@ body.settings-open #now-playing-bar { display: none; }
 /* Opened from within the full player (z-index 30), so it needs to sit above
    it — the shared .overlay base (20) alone isn't enough here. */
 #up-next-overlay { z-index: 32; }
+/* The welcome screens and the folder picker are full-screen steps with their own
+   Next / Select buttons at the bottom. The mini player floats at 25, above the
+   normal overlays so playback stays reachable, and it was covering those buttons
+   (a song still playing from before made the welcome pages impossible to advance). */
+#intro-overlay, #folder-picker-overlay { z-index: 28; }
 /* Now Playing shown separately, above the reorderable Next-up list — same
    split Spotify/Apple Music use, so the currently-playing track is always
    visible but never mixed in with (or draggable within) what's coming up. */
