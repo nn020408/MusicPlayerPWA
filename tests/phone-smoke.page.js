@@ -16,6 +16,7 @@
   // goes through what a user could see (the DOM) or what the app saves (localStorage).
   const savedLibrary = () => { try { return JSON.parse(localStorage.getItem("libraryIndexCache")).tracks; } catch { return []; } };
   const errorLog = () => { try { return JSON.parse(localStorage.getItem("errorLog") || "[]"); } catch { return []; } };
+  const inJsdom = /jsdom/i.test(navigator.userAgent); // the same checks also run in tests/ui.test.js; jsdom has no layout or user-select
   const startedAt = new Date().toISOString(); // error log is capped, so compare by time, not length
 
   try {
@@ -39,8 +40,10 @@
       if (trackRows.length) {
         const withArtist = trackRows.filter((r) => r.querySelector(".row-sub")).length;
         check("browse: song rows show their artist when known", withArtist > 0 || !savedLibrary().some((t) => t.audio && t.audio.artist), withArtist + "/" + trackRows.length);
-        const cs = getComputedStyle(trackRows[0].querySelector(".row-name"));
-        check("browse: song names can't be text-selected", (cs.webkitUserSelect || cs.userSelect) === "none");
+        if (!inJsdom) {
+          const cs = getComputedStyle(trackRows[0].querySelector(".row-name"));
+          check("browse: song names can't be text-selected", (cs.webkitUserSelect || cs.userSelect) === "none");
+        }
       }
       const crumbLinks = document.querySelectorAll("#breadcrumb *");
       const homeCrumb = [...crumbLinks].find((c) => c.dataset && (c.dataset.index !== undefined || c.dataset.idx !== undefined)) || crumbLinks[0];
@@ -59,7 +62,7 @@
     click("#search-btn");
     check("search: overlay opens", await waitFor(() => visible("#search-overlay")));
     const input = $("#search-input");
-    input.value = "jorge";
+    input.value = globalThis.__smokeQuery || "jorge"; // an artist in the phone's real library; ui.test.js sets its own
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await sleep(600);
     const hits = document.querySelectorAll("#search-results .row").length;
