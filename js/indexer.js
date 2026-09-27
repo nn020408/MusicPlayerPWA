@@ -78,8 +78,28 @@ async function waitIndexCooldown(signal) {
   while (!signal.aborted && isIndexThrottled()) await new Promise((r) => setTimeout(r, 250));
 }
 
-// Set by app.js whenever the main view opens a folder — see openFolder().
+// Set (via setIndexPriorityFolder) whenever the main view opens a folder, so
+// what you're looking at is read first.
 let indexPriorityFolderId = null;
+
+function setIndexPriorityFolder(folderId) {
+  indexPriorityFolderId = folderId;
+}
+
+// Owned here: whether artists are being read right now, and how to stop it.
+let isIndexing = false;
+let indexAbortController = null;
+
+// A scan and an indexing run are the two halves of "library work"; Settings'
+// Stop button and the busy checks treat them as one.
+function stopLibraryWork() {
+  abortScan();
+  if (indexAbortController) indexAbortController.abort();
+}
+
+function isLibraryWorkActive() {
+  return isScanning || isIndexing;
+}
 // Songs that really failed during the CURRENT run: skipped for the rest of it
 // so one bad file can't keep the loop spinning on the same folder.
 let indexFailedIds = new Set();
@@ -109,13 +129,11 @@ function indexCounts() {
 // spend battery/data unseen. While music plays with the screen off, the
 // playback keep-alive (player.js) is already keeping the app running, so
 // indexing carries on too. wantsToPlay is player.js's "playback is intended" flag.
-// Set by app.js while the Android foreground service (IndexKeepAlive) is
-// running: it keeps the network and timers alive with the screen off, so
-// being in the background is no longer a reason to wait.
-let indexKeepAliveActive = false;
-
+// The Android foreground service (indexKeepAlive.js) keeps the network and
+// timers alive with the screen off, so with it running, being in the
+// background is no longer a reason to wait.
 function backgroundedAndSilent() {
-  if (indexKeepAliveActive) return false;
+  if (isIndexKeepAliveActive()) return false;
   const playing = typeof wantsToPlay !== "undefined" && wantsToPlay;
   return document.hidden && !playing;
 }

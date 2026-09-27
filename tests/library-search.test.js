@@ -2,7 +2,7 @@ const fs = require("fs"), vm = require("vm");
 process.chdir(require("path").join(__dirname, ".."));
 
 const store = {};
-const ctx = {
+const ctx = { isNative: () => false,
   console, setTimeout, clearTimeout, Promise, Map, Set, AbortController,
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
   navigator: {},
@@ -28,7 +28,7 @@ ctx.listFolder = async (id) => tree[id];
 ctx.getDownloadUrl = async (t) => "http://dl/" + t.id;
 ctx.readArtist = async (url) => { const id = url.split("/").pop(); readOrder.push(id); return tags[id]; };
 
-for (const f of ["js/library.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
 const run = (code) => vm.runInContext(code, ctx);
 
 let failures = 0;

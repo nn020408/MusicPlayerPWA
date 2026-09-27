@@ -18,7 +18,6 @@ let libraryTracks = [];
 // recorded by scanLibrary() so songs can be matched to the PC-made artists file.
 let libraryFolderPaths = {};
 let isScanning = false;
-let isIndexing = false; // owned by js/indexer.js; declared here so stop/active checks below can see it
 
 function getLibraryRootId() {
   try {
@@ -174,17 +173,12 @@ function runWithConcurrency(concurrency, initialItems, handler) {
 // show live scan feedback.
 const SCAN_CONCURRENCY = 5;
 
-// Lets Settings' Stop control cancel an in-progress scan or artist indexing.
+// Lets Settings' Stop control cancel an in-progress scan (indexer.js's
+// stopLibraryWork() stops this and artist indexing together).
 let scanAbortController = null;
-let indexAbortController = null; // set/cleared by js/indexer.js
 
-function stopLibraryWork() {
+function abortScan() {
   if (scanAbortController) scanAbortController.abort();
-  if (indexAbortController) indexAbortController.abort();
-}
-
-function isLibraryWorkActive() {
-  return isScanning || isIndexing;
 }
 
 async function scanLibrary(onProgress) {

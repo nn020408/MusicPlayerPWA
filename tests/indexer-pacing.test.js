@@ -3,7 +3,7 @@ process.chdir(require("path").join(__dirname, ".."));
 const store = {};
 const mk = () => ({ _l: {}, addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); }, removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter((x) => x !== f); }, fire(t) { (this._l[t] || []).slice().forEach((f) => f()); } });
 const doc = Object.assign(mk(), { hidden: false });
-const ctx = {
+const ctx = { isNative: () => false,
   console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Map, Set, AbortController,
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
   navigator: { onLine: true }, document: doc, window: mk(),
@@ -15,7 +15,7 @@ ctx.listFolder = async (id) => (id === "root" ? { folders: [{ id: "f" }], tracks
 let graphUrlCalls = 0;
 ctx.getDownloadUrl = async (t) => { graphUrlCalls++; return "u/" + t.id + "?fresh"; };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let bad = 0;

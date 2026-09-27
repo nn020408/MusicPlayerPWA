@@ -43,9 +43,9 @@ const ctx = {
 ctx.window = Object.assign(window, ctx, { window });
 vm.createContext(ctx);
 
-const order = ["js/errorlog.js", "js/config.js", "js/auth.js", "js/graph.js", "js/library.js", "js/playlists.js", "js/id3.js", "js/indexer.js", "js/player.js", "js/app.js"];
+const order = ["js/errorlog.js", "js/config.js", "js/auth.js", "js/graph.js", "js/library.js", "js/playlists.js", "js/id3.js", "js/indexKeepAlive.js", "js/indexer.js", "js/player.js", "js/app.js"];
 const html = fs.readFileSync("index.html", "utf8");
-const inHtml = [...html.matchAll(/<script src="(js\/[a-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]).filter((f) => !f.includes("vendor"));
+const inHtml = [...html.matchAll(/<script src="(js\/[A-Za-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]).filter((f) => !f.includes("vendor"));
 if (JSON.stringify(inHtml) !== JSON.stringify(order)) { console.log("FAIL script order in index.html differs:\n ", inHtml.join(", "), "\n ", order.join(", ")); process.exit(1); }
 console.log("PASS index.html loads scripts in the expected order (incl. indexer.js before player/app)");
 

@@ -2,7 +2,7 @@ const fs = require("fs"), vm = require("vm");
 process.chdir(require("path").join(__dirname, ".."));
 const store = {};
 const mk = () => ({ _l: {}, addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); }, removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter((x) => x !== f); } });
-const ctx = { console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Map, Set, AbortController,
+const ctx = { isNative: () => false, console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Map, Set, AbortController,
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
   navigator: { onLine: true }, document: Object.assign(mk(), { hidden: false }), window: mk(),
   retryWithBackoff: async (fn, o = {}) => { let last; for (let i = 0; i < (o.maxAttempts || 3); i++) { try { return await fn(); } catch (e) { last = e; await new Promise((r) => setTimeout(r, 5)); } } throw last; } };
@@ -10,7 +10,7 @@ const raws = Array.from({ length: 30 }, (_, i) => ({ id: "s" + i, name: `S${i}.m
 ctx.listFolder = async (id) => (id === "root" ? { folders: [{ id: "f" }], tracks: [] } : { folders: [], tracks: raws });
 ctx.getDownloadUrl = async (t) => "u/" + t.id;
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0; const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };
 (async () => {

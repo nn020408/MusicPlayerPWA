@@ -21,6 +21,7 @@ const SHELL_FILES = [
   "./js/playlists.js",
   "./js/id3.js",
   "./js/player.js",
+  "./js/indexKeepAlive.js",
   "./js/indexer.js",
   "./js/app.js",
   "./manifest.json",

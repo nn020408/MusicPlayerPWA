@@ -1,7 +1,7 @@
 const fs = require("fs"), vm = require("vm");
 process.chdir(require("path").join(__dirname, ".."));
 const store = {};
-const ctx = {
+const ctx = { isNative: () => false,
   console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Map, Set, AbortController,
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
   navigator: {}, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
@@ -14,7 +14,7 @@ ctx.listFolder = async (id) => tree[id];
 ctx.getDownloadUrl = async (t) => "u/" + t.id;
 ctx.readArtist = async () => { reads++; return "Selena Gomez"; };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0;
 const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };
