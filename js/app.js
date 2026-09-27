@@ -4,8 +4,9 @@ import { clearErrorLog, loadErrorLog } from "./errorlog.js";
 import { APP_VERSION } from "./config.js";
 import { getActiveAccount, initAuth, isNative, signIn, signOut } from "./auth.js";
 import { clearFolderListCache, getThumbnailUrl, listFolder, retryWithBackoff } from "./graph.js";
-import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, getArtists, getLibraryRootLabel, isScanning, libraryArtistFor, libraryTracks, loadCachedLibrary, resetLibrary, runWithConcurrency, scanLibrary, searchArtists, searchLibrary, songsByArtistKey, syncArtistsFile } from "./library.js";
+import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, collectTracksRecursive, getArtists, getLibraryRootLabel, isScanning, libraryArtistFor, libraryTracks, loadCachedLibrary, resetLibrary, runWithConcurrency, scanLibrary, searchArtists, searchLibrary, songsByArtistKey, syncArtistsFile } from "./library.js";
 import { FAVORITES_PLAYLIST_ID, addTracksToPlaylist, clearPlaylist, createPlaylist, deletePlaylist, ensureFavoritesPlaylist, loadPlaylists, removeTrackFromPlaylist, renamePlaylist, savePlaylists } from "./playlists.js";
+import { createEmitter } from "./events.js";
 import { syncIndexKeepAlive } from "./indexKeepAlive.js";
 import { indexCounts, isIndexing, isLibraryWorkActive, resetIndexState, setIndexPriorityFolder, startIndexing, stopLibraryWork } from "./indexer.js";
 import { addToQueue, audioEl, cycleRepeat, getUpcomingTracks, playCurrent, playIndex, playNext, playPause, playPrevious, player, queue, queueIndex, repeatMode, resetPlayer, restorePlaybackState, seekTo, setQueue, setUpcomingOrder, shuffleOn, toggleShuffle } from "./player.js";
@@ -151,6 +152,13 @@ const el = {
 };
 
 let libraryLoaded = false;
+
+// What the library work (scan, artist reading) announces, so the features that
+// care can react without the library code knowing about them:
+//   "indexProgress" - artist reading advanced (or its state changed)
+//   "scanned"       - a folder scan finished       "scanFailed" - it didn't
+//   "reset"         - the library was wiped to start again
+const libraryEvents = createEmitter();
 let pendingTracksForPlaylist = [];
 
 function formatTime(seconds) {
@@ -493,6 +501,19 @@ function trackRow(track, { onPlay, onMenu, selectable = false, reorderable = fal
   return row;
 }
 
+// Songs already on screen in the folder view were drawn before their artist
+// was known — fill the artist line in as it arrives instead of making you
+// reopen the folder.
+function refreshVisibleRowArtists() {
+  el.fileList.querySelectorAll(".track-row").forEach((row) => {
+    if (row.querySelector(".row-sub")) return;
+    const artist = libraryArtistFor(row.dataset.trackId);
+    const text = row.querySelector(".row-text");
+    if (artist && text) text.insertAdjacentHTML("beforeend", `<div class="row-sub">${escapeHtml(artist)}</div>`);
+  });
+}
+libraryEvents.on("indexProgress", refreshVisibleRowArtists);
+
 // Keeps already-rendered rows in sync when the playing track changes without
 // the list itself being re-rendered (e.g. skipping next/previous while
 // looking at the same folder/search results/playlist).
@@ -509,9 +530,28 @@ function updateNowPlayingRows() {
 }
 
 // ---------- Main view: folder navigation, rooted at the chosen music folder ----------
+// The browse state: the path of open folders from the library root down (the
+// last one is what's on screen) and what that folder lists. Only these
+// functions change it, so other features can read it but never reassign it.
 let folderStack = [];
 let currentTracks = [];
 let currentFolders = [];
+function currentFolder() {
+  return folderStack[folderStack.length - 1];
+}
+function pushFolder(folder) {
+  folderStack.push(folder);
+}
+function truncateFolderStack(length) {
+  folderStack = folderStack.slice(0, length);
+}
+function replaceFolderStack(stack) {
+  folderStack = stack;
+}
+function setListing(tracks, folders) {
+  currentTracks = tracks;
+  currentFolders = folders;
+}
 
 function renderBreadcrumb() {
   el.breadcrumb.innerHTML = "";
@@ -520,7 +560,7 @@ function renderBreadcrumb() {
     btn.className = "crumb";
     btn.textContent = folder.name;
     btn.addEventListener("click", () => {
-      folderStack = folderStack.slice(0, i + 1);
+      truncateFolderStack(i + 1);
       openFolder(folder.id, false);
     });
     el.breadcrumb.appendChild(btn);
@@ -531,25 +571,6 @@ function renderBreadcrumb() {
       el.breadcrumb.appendChild(sep);
     }
   });
-}
-
-// Walks a folder and every subfolder beneath it (any depth), collecting all
-// audio files — used for "play this folder" / "add folder to playlist" and
-// the shuffle-everything button. Same bounded-concurrency walker as the
-// search index scan (see runWithConcurrency in library.js), just scoped to
-// one folder instead of the whole library.
-async function collectTracksRecursive(folderId) {
-  const tracks = [];
-  await runWithConcurrency(5, [folderId], async (id) => {
-    // Retried the same as every other folder listing in the app — without
-    // this, one flaky request anywhere in a wide folder tree would abort the
-    // whole "play this folder" / "add to playlist" action outright instead
-    // of just riding out the blip.
-    const { folders, tracks: folderTracks } = await retryWithBackoff(() => listFolder(id));
-    tracks.push(...folderTracks);
-    return folders.map((f) => f.id);
-  });
-  return tracks;
 }
 
 let pendingFolderForActions = null;
@@ -566,7 +587,7 @@ async function openFolder(folderId, pushToStack, folderName) {
   // currentFolders/currentTracks below) — navigating away would leave it
   // pointing at rows that no longer exist, so just close it out first.
   if (selectMode) exitSelectMode();
-  if (pushToStack) folderStack.push({ id: folderId, name: folderName });
+  if (pushToStack) pushFolder({ id: folderId, name: folderName });
   renderBreadcrumb();
   el.statusMsg.innerHTML = `<span class="spinner"></span>Loading…`;
   el.fileList.innerHTML = "";
@@ -575,7 +596,7 @@ async function openFolder(folderId, pushToStack, folderName) {
   // backoff instead of dead-ending on one attempt. isStillHere() guards
   // against applying a stale retry's result after the user has since
   // navigated to a different folder.
-  const isStillHere = () => folderStack[folderStack.length - 1]?.id === folderId;
+  const isStillHere = () => currentFolder()?.id === folderId;
   try {
     const { folders, tracks } = await retryWithBackoff(() => listFolder(folderId), {
       onRetry: (attempt) => {
@@ -583,8 +604,7 @@ async function openFolder(folderId, pushToStack, folderName) {
       },
     });
     if (!isStillHere()) return;
-    currentTracks = tracks;
-    currentFolders = folders;
+    setListing(tracks, folders);
     el.statusMsg.textContent = folders.length + tracks.length === 0 ? "This folder is empty." : "";
 
     folders.forEach((folder) => {
@@ -650,8 +670,16 @@ async function openFolder(folderId, pushToStack, folderName) {
 }
 
 function openMainFolderView(stack) {
-  folderStack = stack;
-  openFolder(folderStack[folderStack.length - 1].id, false);
+  replaceFolderStack(stack);
+  openFolder(currentFolder().id, false);
+}
+
+// One level up in the main view (the Android back button). False when already at the top.
+function goUpOneFolder() {
+  if (folderStack.length <= 1) return false;
+  truncateFolderStack(folderStack.length - 1);
+  openFolder(currentFolder().id, false);
+  return true;
 }
 
 // ---------- Library scan (powers Search — the main view itself is folder browsing) ----------
@@ -660,6 +688,19 @@ function openMainFolderView(stack) {
 // of each kicking off its own — that was the cause of a second "Scanning…"
 // toast firing if you opened Search while the automatic scan was still running.
 let libraryLoadPromise = null;
+
+// The library was replaced or wiped (new folder, restore, reset, sign-out): the
+// next ensureLibraryLoaded() must load it again. forgetLoad also drops a load
+// that is still in flight.
+function markLibraryStale({ forgetLoad = false } = {}) {
+  libraryLoaded = false;
+  if (forgetLoad) libraryLoadPromise = null;
+}
+
+// The saved library was just swapped in (restore) and is ready to use.
+function markLibraryLoaded() {
+  libraryLoaded = true;
+}
 
 async function ensureLibraryLoaded() {
   if (libraryLoaded) return;
@@ -724,24 +765,7 @@ function onIndexProgress({ done, total, state, retryInSeconds }) {
   } else if (state === "datasaver") {
     el.scanStatus.textContent = "Artist indexing is paused because data saver is on. Tap Resume in Search > Artists to run it anyway.";
   }
-  updateIndexBanner();
-  refreshVisibleRowArtists();
-}
-
-// Songs already on screen in the folder view were drawn before their artist
-// was known — fill the artist line in as it arrives instead of making you
-// reopen the folder.
-function refreshVisibleRowArtists() {
-  const rows = el.fileList.querySelectorAll(".track-row");
-  if (!rows.length) return;
-  const byId = new Map(libraryTracks.map((t) => [t.id, t]));
-  rows.forEach((row) => {
-    if (row.querySelector(".row-sub")) return;
-    const track = byId.get(row.dataset.trackId);
-    const artist = track && track.audio && track.audio.artist;
-    const text = row.querySelector(".row-text");
-    if (artist && text) text.insertAdjacentHTML("beforeend", `<div class="row-sub">${escapeHtml(artist)}</div>`);
-  });
+  libraryEvents.emit("indexProgress");
 }
 
 // Cancels an in-progress scan and waits for it to actually wind down
@@ -793,17 +817,13 @@ async function rescanLibrary() {
     libraryLoaded = true;
     const doneMsg = `Done — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found.`;
     el.scanStatus.textContent = doneMsg;
-    if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) {
-      renderSearchHome();
-    }
+    libraryEvents.emit("scanned");
     showToast(`Search ready — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found`);
     kickOffIndexing();
   } catch (err) {
     console.error(err);
     el.scanStatus.textContent = "Scan failed: " + (err.message || err);
-    if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) {
-      el.searchResults.innerHTML = `<p class="status-msg">Couldn't finish scanning your library.</p>`;
-    }
+    libraryEvents.emit("scanFailed");
     showToast("Couldn't finish scanning your library");
   } finally {
     updateRescanButtonUI();
@@ -811,7 +831,8 @@ async function rescanLibrary() {
 }
 
 // ---------- Detail overlay (playlist tracklists) ----------
-function openDetailList(title, tracks, playlistId) {
+// onChanged (optional) is called after a song is removed from the playlist being shown.
+function openDetailList(title, tracks, playlistId, onChanged) {
   el.detailTitle.textContent = title;
   el.detailList.innerHTML = "";
   el.detailHeaderActions.classList.toggle("hidden", tracks.length === 0);
@@ -841,8 +862,8 @@ function openDetailList(title, tracks, playlistId) {
             if (confirm(`Remove "${track.name.replace(/\.[^/.]+$/, "")}" from this playlist?`)) {
               removeTrackFromPlaylist(playlistId, track.id);
               const updated = loadPlaylists().find((p) => p.id === playlistId);
-              openDetailList(title, updated ? updated.tracks : [], playlistId);
-              renderPlaylistsList();
+              openDetailList(title, updated ? updated.tracks : [], playlistId, onChanged);
+              if (onChanged) onChanged();
             }
           } else {
             openAddToPlaylistModal(track);
@@ -1002,6 +1023,21 @@ function openFolderPicker(mode) {
   loadFpFolder("root");
 }
 
+// Android back while the folder picker is open: step up one level within the
+// picker itself first, same as the main folder view — works in both onboarding
+// and "change folder" mode, since it never dismisses the picker, just
+// navigates within it. At the picker's own root: onboarding has no Cancel
+// button — it's mandatory, so back can't dismiss it there.
+function handleFolderPickerBack() {
+  if (fpStack.length > 1) {
+    fpStack = fpStack.slice(0, -1);
+    loadFpFolder(fpStack[fpStack.length - 1].id);
+    return true;
+  }
+  if (!el.folderPickerCancelBtn.classList.contains("hidden")) closeFolderPicker();
+  return true; // always consumed, even when there was nothing to do
+}
+
 function closeFolderPicker() {
   el.folderPickerOverlay.classList.add("hidden");
   el.nowPlayingBar.classList.remove("select-mode-hidden");
@@ -1039,7 +1075,7 @@ function setLibraryFolder(folder) {
   // fresh cache for the restored folder just before this runs (the intro's
   // restore flow sends you into this same picker afterward), making every
   // restore immediately force a full rescan instead of using what was just restored.
-  libraryLoaded = false;
+  markLibraryStale();
 }
 
 // ---------- First-time intro (#intro-overlay) ----------
@@ -1074,6 +1110,20 @@ function renderIntroPanel() {
   el.introNextBtn.classList.toggle("hidden", introPanelIndex === INTRO_PANEL_COUNT - 1);
 }
 
+// Android back while the welcome guide is open: step back a panel first. On the
+// first panel: a revisit from Settings just closes; the mandatory first-run
+// version has nowhere to go, so it consumes the press instead of letting it
+// fall through to exiting the app mid-setup.
+function handleIntroBack() {
+  if (introPanelIndex > 0) {
+    introPanelIndex--;
+    renderIntroPanel();
+    return true;
+  }
+  if (!introIsOnboarding) el.introOverlay.classList.add("hidden");
+  return true;
+}
+
 function finishIntro() {
   localStorage.setItem(INTRO_SEEN_KEY, "1");
   el.introOverlay.classList.add("hidden");
@@ -1090,8 +1140,12 @@ el.introBackBtn.addEventListener("click", () => {
 });
 el.introFinishBtn.addEventListener("click", finishIntro);
 el.introRestoreBtn.addEventListener("click", () => {
-  restoreTriggeredFromIntro = true;
-  el.restoreFileInput.click();
+  // A failed restore leaves the intro open on the same panel so you can
+  // retry or fall back to "No, this is fresh" instead — only a genuine
+  // success advances into the folder picker.
+  pickBackupFile((succeeded) => {
+    if (succeeded) finishIntro();
+  });
 });
 el.showIntroBtn.addEventListener("click", () => {
   el.settingsOverlay.classList.add("hidden");
@@ -1120,7 +1174,7 @@ function renderPlaylistsList() {
     `;
     row.addEventListener("click", (e) => {
       if (e.target.closest(".row-menu-btn")) return;
-      openDetailList(pl.name, pl.tracks, pl.id);
+      openDetailList(pl.name, pl.tracks, pl.id, renderPlaylistsList);
     });
     row.querySelector(".row-menu-btn").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1296,7 +1350,7 @@ el.folderAddPlaylistBtn.addEventListener("click", async () => {
 // else), so a blocking yes/no felt like unnecessary friction for what's
 // meant to be a quick "shuffle everything" action.
 el.shuffleViewBtn.addEventListener("click", async () => {
-  const folder = folderStack[folderStack.length - 1];
+  const folder = currentFolder();
   if (!folder) return;
   showToast(`Loading songs from "${folder.name}"…`);
   try {
@@ -1363,6 +1417,19 @@ function updateIndexBanner() {
   if (banner) banner.innerHTML = indexBannerHtml();
 }
 
+libraryEvents.on("indexProgress", updateIndexBanner);
+libraryEvents.on("scanned", () => {
+  if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) renderSearchHome();
+});
+libraryEvents.on("scanFailed", () => {
+  if (!el.searchOverlay.classList.contains("hidden") && !el.searchInput.value.trim()) {
+    el.searchResults.innerHTML = `<p class="status-msg">Couldn't finish scanning your library.</p>`;
+  }
+});
+libraryEvents.on("reset", () => {
+  if (!el.searchOverlay.classList.contains("hidden")) el.searchResults.innerHTML = "";
+});
+
 function artistRowHtml(a) {
   return `<div class="row" data-artist-key="${encodeURIComponent(a.key)}">
     <span class="row-icon">🎤</span>
@@ -1379,6 +1446,17 @@ function renderSearchHome() {
       <span class="row-icon">🎤</span>
       <div class="row-text"><div class="row-name">Artists</div><div class="row-sub">${sub}</div></div>
     </div>`;
+}
+
+// Android back while Search is open: the Artists view is one level inside
+// Search, so step back out of it first.
+function handleSearchBack() {
+  if (searchView === "artists") {
+    renderSearchHome();
+    return true;
+  }
+  el.searchOverlay.classList.add("hidden");
+  return true;
 }
 
 function renderArtistsView() {
@@ -1553,10 +1631,9 @@ el.resetLibraryBtn.addEventListener("click", async () => {
   await stopLibraryWorkAndWait();
   resetLibrary();
   resetIndexState();
-  libraryLoaded = false;
-  libraryLoadPromise = null;
+  markLibraryStale({ forgetLoad: true });
   el.scanStatus.textContent = "";
-  if (!el.searchOverlay.classList.contains("hidden")) el.searchResults.innerHTML = "";
+  libraryEvents.emit("reset");
   showToast("Starting from zero…");
   rescanLibrary(); // scans from nothing, then kicks off artist indexing when done
 });
@@ -1687,14 +1764,14 @@ function importBackupFile(file, onDone) {
         // keep grinding away on data this restore is about to throw away.
         await stopLibraryWorkAndWait();
         localStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify(backup.libraryCache));
-        libraryLoaded = false;
+        markLibraryStale();
         // Swap the live in-memory library over immediately instead of just
         // leaving stale data (and a stale Settings status line) sitting
         // around until something else happens to touch the library later —
         // that silence was exactly what made a restore look like it hadn't
         // done anything.
         if (loadCachedLibrary()) {
-          libraryLoaded = true;
+          markLibraryLoaded();
           el.scanStatus.textContent = `Restored — ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"}.`;
           kickOffIndexing();
         } else {
@@ -1717,24 +1794,22 @@ function importBackupFile(file, onDone) {
 
 el.backupBtn.addEventListener("click", () => exportBackup(false));
 el.shareBackupBtn.addEventListener("click", () => exportBackup(true));
-el.restoreBtn.addEventListener("click", () => el.restoreFileInput.click());
+el.restoreBtn.addEventListener("click", () => pickBackupFile());
 el.restoreFileInput.addEventListener("change", () => {
   const file = el.restoreFileInput.files[0];
-  if (file) importBackupFile(file, restoreFileInputDone);
+  const onDone = restoreDone;
+  restoreDone = null;
+  if (file) importBackupFile(file, onDone);
   el.restoreFileInput.value = ""; // reset so selecting the same file again still fires "change"
 });
-// Set only while the intro's "Restore from file" button is what triggered
-// el.restoreFileInput — lets one shared <input type=file> serve both Settings'
-// plain restore and the intro flow (which needs to know to continue into the
-// folder picker afterward) without duplicating the file input or the reader logic.
-let restoreTriggeredFromIntro = false;
-function restoreFileInputDone(succeeded) {
-  if (!restoreTriggeredFromIntro) return;
-  restoreTriggeredFromIntro = false;
-  // A failed restore leaves the intro open on the same panel so you can
-  // retry or fall back to "No, this is fresh" instead — only a genuine
-  // success advances into the folder picker.
-  if (succeeded) finishIntro();
+// One shared <input type=file> serves both Settings' plain restore and the
+// welcome guide's. `restoreDone` is whoever opened the picker's callback, told
+// afterwards whether the restore worked (the welcome guide uses it to carry on
+// into the folder picker).
+let restoreDone = null;
+function pickBackupFile(onDone) {
+  restoreDone = onDone || null;
+  el.restoreFileInput.click();
 }
 
 // ---------- Error log (Settings > View error log) ----------
@@ -1891,13 +1966,7 @@ player.onTrackChange = (item) => {
   // resolves for THIS track — lyrics matching prefers this over
   // item.audio.artist (see fetchLyricsResult), since that's the exact
   // title/artist actually shown on screen, not OneDrive's lighter metadata.
-  currentRealTags = null;
-  // A fresh promise per track that onRealTags resolves — lets a lyrics fetch
-  // started before the real tag arrives wait for it once instead of firing
-  // twice (fetch now with weak data, fetch again once better data shows up).
-  realTagsPromise = new Promise((resolve) => {
-    resolveRealTagsPromise = resolve;
-  });
+  startTrackTags();
 
   el.miniArt.classList.add("hidden");
   el.miniArtFallback.classList.remove("hidden");
@@ -2010,11 +2079,7 @@ player.onRealTags = (tags) => {
 
   // player.js only guarantees this fires for whatever's still current, so
   // it's safe to trust queue[queueIndex] here (see the guard in playCurrent).
-  currentRealTags = tags;
-  if (resolveRealTagsPromise) {
-    resolveRealTagsPromise(tags);
-    resolveRealTagsPromise = null;
-  }
+  provideRealTags(tags);
 };
 
 // Restarts the CSS press animation even on rapid repeat taps (removing then
@@ -2126,12 +2191,7 @@ function closeFullPlayer() {
   el.fullPlayer.classList.add("hidden");
   // Reopening always starts back on album art, not wherever lyrics view was
   // left — avoids surprising state the next time this is opened.
-  if (lyricsViewActive) {
-    lyricsViewActive = false;
-    el.fullPlayerArt.classList.remove("hidden");
-    el.lyricsPanel.classList.add("hidden");
-    el.lyricsBtn.classList.remove("icon-active");
-  }
+  closeLyricsView();
 }
 el.fullPlayerCloseBtn.addEventListener("click", closeFullPlayer);
 el.addToPlaylistBtn.addEventListener("click", () => {
@@ -2210,6 +2270,36 @@ let currentRealTags = null;
 let realTagsPromise = null;
 let resolveRealTagsPromise = null;
 let activeLyricsLineIndex = -1;
+
+// A new track started: forget the previous track's real tags and set up a fresh
+// promise that provideRealTags() resolves — lets a lyrics fetch started before
+// the real tag arrives wait for it once instead of firing twice (fetch now with
+// weak data, fetch again once better data shows up).
+function startTrackTags() {
+  currentRealTags = null;
+  realTagsPromise = new Promise((resolve) => {
+    resolveRealTagsPromise = resolve;
+  });
+}
+
+// The real embedded tag read for the current track has arrived.
+function provideRealTags(tags) {
+  currentRealTags = tags;
+  if (resolveRealTagsPromise) {
+    resolveRealTagsPromise(tags);
+    resolveRealTagsPromise = null;
+  }
+}
+
+// Leaves the lyrics view (closing the full player does this, so reopening it
+// always starts back on the album art).
+function closeLyricsView() {
+  if (!lyricsViewActive) return;
+  lyricsViewActive = false;
+  el.fullPlayerArt.classList.remove("hidden");
+  el.lyricsPanel.classList.add("hidden");
+  el.lyricsBtn.classList.remove("icon-active");
+}
 
 // Waits briefly for the real tag read to resolve (if one's in flight for the
 // current track) rather than immediately settling for weaker metadata —
@@ -2680,36 +2770,8 @@ function handleBackPress() {
     el.detailOverlay.classList.add("hidden");
     return true;
   }
-  if (!el.introOverlay.classList.contains("hidden")) {
-    // Step back a panel first, same idea as the folder picker below. On the
-    // first panel: a revisit from Settings just closes; the mandatory
-    // first-run version has nowhere to go, so it consumes the press instead
-    // of letting it fall through to exiting the app mid-setup.
-    if (introPanelIndex > 0) {
-      introPanelIndex--;
-      renderIntroPanel();
-      return true;
-    }
-    if (!introIsOnboarding) el.introOverlay.classList.add("hidden");
-    return true;
-  }
-  if (!el.folderPickerOverlay.classList.contains("hidden")) {
-    // Step up one level within the picker itself first, same as the main
-    // folder view — works in both onboarding and "change folder" mode, since
-    // it never dismisses the picker, just navigates within it.
-    if (fpStack.length > 1) {
-      fpStack = fpStack.slice(0, -1);
-      loadFpFolder(fpStack[fpStack.length - 1].id);
-      return true;
-    }
-    // At the picker's own root: onboarding has no Cancel button — it's
-    // mandatory, so back shouldn't be able to dismiss it there.
-    if (!el.folderPickerCancelBtn.classList.contains("hidden")) {
-      closeFolderPicker();
-      return true;
-    }
-    return true; // onboarding, nothing to do, but still consume the back press
-  }
+  if (!el.introOverlay.classList.contains("hidden")) return handleIntroBack();
+  if (!el.folderPickerOverlay.classList.contains("hidden")) return handleFolderPickerBack();
   if (!el.settingsOverlay.classList.contains("hidden")) {
     el.settingsOverlay.classList.add("hidden");
     return true;
@@ -2718,20 +2780,8 @@ function handleBackPress() {
     el.playlistsOverlay.classList.add("hidden");
     return true;
   }
-  if (!el.searchOverlay.classList.contains("hidden")) {
-    // Artists view is one level inside Search — step back out of it first.
-    if (searchView === "artists") {
-      renderSearchHome();
-      return true;
-    }
-    el.searchOverlay.classList.add("hidden");
-    return true;
-  }
-  if (folderStack.length > 1) {
-    folderStack = folderStack.slice(0, -1);
-    openFolder(folderStack[folderStack.length - 1].id, false);
-    return true;
-  }
+  if (!el.searchOverlay.classList.contains("hidden")) return handleSearchBack();
+  if (goUpOneFolder()) return true;
   // Nothing left to close and we're at the top of folder navigation.
   if (isNative()) {
     // Native convention: minimize like any normal Android app, rather than
@@ -2883,7 +2933,7 @@ el.signOutBtn.addEventListener("click", async () => {
   localStorage.removeItem(DEFAULT_FOLDER_KEY);
   localStorage.removeItem(LIBRARY_CACHE_KEY);
   clearFolderListCache();
-  libraryLoaded = false;
+  markLibraryStale();
   resetPlayer();
   el.nowPlayingBar.classList.add("hidden");
   // Settings (where this button lives) is a separate fixed-position overlay

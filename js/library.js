@@ -237,6 +237,25 @@ export async function scanLibrary(onProgress) {
   return libraryTracks;
 }
 
+// Walks a folder and every subfolder beneath it (any depth), collecting all
+// audio files — used for "play this folder" / "add folder to playlist" and
+// the shuffle-everything button. Same bounded-concurrency walker as the
+// search index scan (see runWithConcurrency in library.js), just scoped to
+// one folder instead of the whole library.
+export async function collectTracksRecursive(folderId) {
+  const tracks = [];
+  await runWithConcurrency(5, [folderId], async (id) => {
+    // Retried the same as every other folder listing in the app — without
+    // this, one flaky request anywhere in a wide folder tree would abort the
+    // whole "play this folder" / "add to playlist" action outright instead
+    // of just riding out the blip.
+    const { folders, tracks: folderTracks } = await retryWithBackoff(() => listFolder(id));
+    tracks.push(...folderTracks);
+    return folders.map((f) => f.id);
+  });
+  return tracks;
+}
+
 // ---------- Artists file (made on the PC) ----------
 //
 // tools/scan-artists.js reads every tag from the local copy of the library and
