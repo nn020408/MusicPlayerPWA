@@ -3,7 +3,7 @@
 import { escapeHtml } from "../core/text.js";
 import { el } from "../core/dom.js";
 import { libraryArtistFor } from "../data/library.js";
-import { queue, queueIndex } from "../player/player.js";
+import { currentTrack } from "../player/player.js";
 import { libraryEvents } from "./libraryWork.js";
 import { enterSelectMode, selectKey, selectMode, selectedItems, setupLongPress, toggleItemSelection } from "./select.js";
 
@@ -20,7 +20,7 @@ const NOTE_ICON = `<span class="row-icon">🎵</span>`;
 // list render the exact same rows they always have.
 export function trackRow(track, { onPlay, onMenu, selectable = false, reorderable = false }) {
   const row = document.createElement("div");
-  const isPlaying = !!(queue[queueIndex] && queue[queueIndex].id === track.id);
+  const isPlaying = !!(currentTrack() && currentTrack().id === track.id);
   row.className = "row track-row" + (isPlaying ? " now-playing-row" : "");
   row.dataset.trackId = track.id;
   const artist = (track.audio && track.audio.artist) || libraryArtistFor(track.id);
@@ -78,7 +78,7 @@ libraryEvents.on("indexProgress", refreshVisibleRowArtists);
 // the list itself being re-rendered (e.g. skipping next/previous while
 // looking at the same folder/search results/playlist).
 export function updateNowPlayingRows() {
-  const currentId = queue[queueIndex] && queue[queueIndex].id;
+  const currentId = currentTrack() && currentTrack().id;
   document.querySelectorAll(".track-row").forEach((row) => {
     const isPlaying = row.dataset.trackId === currentId;
     const wasPlaying = row.classList.contains("now-playing-row");

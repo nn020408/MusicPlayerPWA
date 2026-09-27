@@ -4,7 +4,7 @@
 import { formatTime } from "../core/text.js";
 import { el } from "../core/dom.js";
 import { getThumbnailUrl } from "../data/graph.js";
-import { audioEl, cycleRepeat, playNext, playPause, playPrevious, player, queue, queueIndex, seekTo, toggleShuffle } from "../player/player.js";
+import { audioEl, currentTrack, cycleRepeat, playNext, playPause, playPrevious, player, seekTo, toggleShuffle } from "../player/player.js";
 import { hideToast, showToast } from "./toast.js";
 import { paintFallbackArt } from "./fallbackArt.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
@@ -76,7 +76,7 @@ async function findOnlineArtwork(title, artist) {
 // (a folder mixing multiple artists/albums means "some image in this
 // folder" is often the WRONG cover, not a good guess).
 async function tryOnlineArtFallback(item) {
-  if (queue[queueIndex] !== item) return; // track changed since this was scheduled
+  if (currentTrack() !== item) return; // track changed since this was scheduled
   // Check what's actually on screen, not just whether OneDrive claimed to
   // have a thumbnail — a "found" thumbnail URL can still fail to load (that's
   // exactly why the error-fallback exists), so trusting that flag here was
@@ -87,7 +87,7 @@ async function tryOnlineArtFallback(item) {
   const artist = (item.audio && item.audio.artist) || "";
   try {
     const url = await findOnlineArtwork(title, artist);
-    if (url && queue[queueIndex] === item) {
+    if (url && currentTrack() === item) {
       applyRealArt(url);
     }
   } catch (err) {
@@ -137,7 +137,7 @@ player.onTrackChange = (item) => {
   setTimeout(() => tryOnlineArtFallback(item), 2500);
 
   getThumbnailUrl(item.id).then((url) => {
-    if (!url || queue[queueIndex] !== item) return;
+    if (!url || currentTrack() !== item) return;
     el.miniArt.src = url;
     el.miniArt.classList.remove("hidden");
     el.miniArtFallback.classList.add("hidden");
@@ -240,7 +240,7 @@ player.onRealTags = (tags) => {
   }
 
   // player.js only guarantees this fires for whatever's still current, so
-  // it's safe to trust queue[queueIndex] here (see the guard in playCurrent).
+  // it's safe to trust currentTrack() here (see the guard in playCurrent).
   provideRealTags(tags);
 };
 
@@ -354,7 +354,7 @@ el.shuffleBtn.addEventListener("click", toggleShuffle);
 el.repeatBtn.addEventListener("click", cycleRepeat);
 
 export function openFullPlayer() {
-  if (!queue[queueIndex]) return;
+  if (!currentTrack()) return;
   el.fullPlayer.classList.remove("hidden");
 }
 
@@ -368,6 +368,6 @@ export function closeFullPlayer() {
 el.fullPlayerCloseBtn.addEventListener("click", closeFullPlayer);
 
 el.addToPlaylistBtn.addEventListener("click", () => {
-  const track = queue[queueIndex];
+  const track = currentTrack();
   if (track) openAddToPlaylistModal(track);
 });

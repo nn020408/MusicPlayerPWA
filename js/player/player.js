@@ -95,7 +95,12 @@ function nativeMediaSession() {
 }
 
 export let queue = [];
-export let queueIndex = -1;
+let queueIndex = -1;
+
+// The song that is current (playing or paused), or undefined when nothing is queued.
+export function currentTrack() {
+  return queue[queueIndex];
+}
 let playOrder = []; // sequence of indices into `queue` — the actual play order
 let orderPos = -1; // position within playOrder
 export let shuffleOn = false;
@@ -105,7 +110,7 @@ let currentArtBlobUrl = null; // tracks the last embedded-art blob URL so we can
 let currentBlobUrl = null; // tracks the audio object URL backing audioEl.src (if any), so we can revoke it once we move off it
 let loadedTrackId = null; // id of the track audioEl.src actually corresponds to right now — see playPause()
 // Bumped on every playCurrent() call, regardless of which track it's for.
-// Comparing queue[queueIndex] === item alone breaks under Next/Previous
+// Comparing currentTrack() === item alone breaks under Next/Previous
 // ping-pong during a network retry: going B -> A -> B while B's original
 // retry is still in flight makes that stale attempt's item reference match
 // again, so it can win a race against the fresh attempt and land the wrong
@@ -227,7 +232,7 @@ let lastStateSaveAt = 0;
 // audioEl.currentTime (still the previous track's position at that point)
 // never leaks into the new track's saved entry.
 function savePlaybackState(overridePosition) {
-  const item = queue[queueIndex];
+  const item = currentTrack();
   if (!item) return;
   try {
     localStorage.setItem(
@@ -264,7 +269,7 @@ export function restorePlaybackState() {
     pendingResumeIndex = queueIndex;
     pendingResumePosition = state.position || 0;
     hasPendingResume = true;
-    return queue[queueIndex];
+    return currentTrack();
   } catch (err) {
     console.warn("Couldn't restore playback state", err);
     return null;
@@ -343,7 +348,7 @@ export function cycleRepeat() {
 }
 
 export async function playCurrent() {
-  const item = queue[queueIndex];
+  const item = currentTrack();
   if (!item) return;
   setWantsToPlay(true);
   const myGeneration = ++playGeneration;
@@ -458,7 +463,7 @@ export async function playCurrent() {
     savePlaybackState();
 
     id3Promise.then((tags) => {
-      if (!tags || queue[queueIndex] !== item) return;
+      if (!tags || currentTrack() !== item) return;
 
       let pictureUrl = null;
       if (tags.picture && tags.picture.bytes && tags.picture.bytes.length > 0) {
@@ -526,7 +531,7 @@ export async function playIndex(index) {
 // reloading via playCurrent() is the only thing that can actually recover it.
 function resumePlayback() {
   setWantsToPlay(true);
-  const current = queue[queueIndex];
+  const current = currentTrack();
   if (current && (loadedTrackId !== current.id || audioEl.error)) {
     if (audioEl.error) {
       // Stash wherever we actually are (including anywhere just seeked to —
@@ -612,7 +617,7 @@ export function getUpcomingTracks(maxCount) {
   // Repeat-one plays only the current song again — there's nothing else
   // "up next" to show, so this is deliberately empty rather than [current].
   if (repeatMode === "one") return [];
-  const currentId = queue[queueIndex] && queue[queueIndex].id;
+  const currentId = currentTrack() && currentTrack().id;
   const upcoming = [];
   const limit = Math.min(maxCount, playOrder.length - 1);
   let pos = orderPos;
@@ -691,7 +696,7 @@ export function resetPlayer() {
 // navigator.onLine actually going false) usually needs a few attempts spread
 // over time to ride out, not just one immediate retry.
 audioEl.addEventListener("error", async () => {
-  const item = queue[queueIndex];
+  const item = currentTrack();
   if (!item) return;
   // Same generation token playCurrent() uses — an item-reference check
   // alone would wrongly consider this recovery "still relevant" if you

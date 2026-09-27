@@ -3,7 +3,7 @@
 import { escapeHtml } from "../core/text.js";
 import { el } from "../core/dom.js";
 import { libraryArtistFor } from "../data/library.js";
-import { getUpcomingTracks, playIndex, queue, queueIndex, repeatMode } from "../player/player.js";
+import { currentTrack, getUpcomingTracks, playIndex, queue, repeatMode } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { EQUALIZER_ICON, trackRow } from "./trackRow.js";
 import { enableQueueDragReorder } from "./detailOverlay.js";
@@ -12,7 +12,7 @@ import { enableQueueDragReorder } from "./detailOverlay.js";
 // replacing it with setQueue — tapping an upcoming track should just skip
 // ahead to it, not turn "what's next" into a brand new queue.
 function renderUpNextNowPlaying() {
-  const current = queue[queueIndex];
+  const current = currentTrack();
   const hasCurrent = !!current;
   el.upNextNowLabel.classList.toggle("hidden", !hasCurrent);
   el.upNextNowRow.classList.toggle("hidden", !hasCurrent);

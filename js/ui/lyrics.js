@@ -2,7 +2,7 @@
 // in the full player.
 
 import { el } from "../core/dom.js";
-import { audioEl, queue, queueIndex } from "../player/player.js";
+import { audioEl, currentTrack } from "../player/player.js";
 
 // LRCLIB (lrclib.net) is a free, keyless, crowd-sourced lyrics API — same
 // "one small request for the currently-playing track only" pattern as
@@ -256,7 +256,7 @@ async function fetchLyricsResult(track) {
   // the tag read is still in flight for this track, wait up to 3s for it —
   // one fetch with the best available data, instead of fetching now and
   // potentially again once the real tag shows up.
-  const realTags = queue[queueIndex] === track ? await waitForRealTags(3000) : null;
+  const realTags = currentTrack() === track ? await waitForRealTags(3000) : null;
 
   const rawTitle = (realTags && realTags.title) || track.name.replace(/\.[^/.]+$/, "");
   const cleanTitle = cleanTrackTitle(rawTitle);
@@ -350,17 +350,17 @@ function renderLyricsPanel(lyrics) {
 }
 
 export async function showLyricsForCurrentTrack() {
-  const track = queue[queueIndex];
+  const track = currentTrack();
   if (!track) return;
   currentLyrics = null;
   el.lyricsPanel.innerHTML = `<p class="status-msg lyrics-empty"><span class="spinner"></span>Loading lyrics…</p>`;
   try {
     const lyrics = await getLyricsForTrack(track);
-    if (queue[queueIndex] !== track || !lyricsViewActive) return; // track/view changed while fetching
+    if (currentTrack() !== track || !lyricsViewActive) return; // track/view changed while fetching
     currentLyrics = lyrics;
     renderLyricsPanel(lyrics);
   } catch (err) {
-    if (queue[queueIndex] !== track || !lyricsViewActive) return;
+    if (currentTrack() !== track || !lyricsViewActive) return;
     console.error("Lyrics lookup failed", err);
     el.lyricsPanel.innerHTML = `<p class="status-msg lyrics-empty">Couldn't load lyrics.</p>`;
   }

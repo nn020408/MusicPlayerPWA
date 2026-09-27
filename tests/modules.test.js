@@ -60,6 +60,7 @@ function staticCheck() {
     exportsOf.set(f, names);
   }
   let problems = [];
+  const importedKeys = new Set(); // "module:name" for every named import, to spot exports nothing uses
   for (const [f, { ast, sm }] of parsed) {
     const imported = new Set();
     for (const n of ast.body) {
@@ -68,6 +69,7 @@ function staticCheck() {
       if (!exportsOf.has(target)) { problems.push(`${f}: imports from missing module ${n.source.value}`); continue; }
       for (const s of n.specifiers) {
         imported.add(s.local.name);
+        importedKeys.add(target + ":" + s.imported.name);
         if (!exportsOf.get(target).has(s.imported.name)) problems.push(`${f}: imports ${s.imported.name} but ${target} does not export it`);
       }
     }
@@ -85,6 +87,10 @@ function staticCheck() {
     for (const name of imported) if (!used.has(name)) problems.push(`${f}: imports ${name} but never uses it`);
   }
   check(`static wiring: ${files.length} modules, every import/export and name resolves`, problems.length === 0, problems.slice(0, 8).join("\n   "));
+  // a module's public surface should be only what others actually use
+  const deadExports = [];
+  for (const [f, names] of exportsOf) for (const n of names) if (!importedKeys.has(f + ":" + n)) deadExports.push(`${f}: ${n}`);
+  check("no dead exports: every exported name is imported somewhere", deadExports.length === 0, deadExports.slice(0, 8).join(", "));
 }
 
 async function loadCheck() {
