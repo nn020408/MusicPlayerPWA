@@ -147,9 +147,7 @@ el.signOutBtn.addEventListener("click", async () => {
   showLogin();
 });
 
-ensureFavoritesPlaylist();
-
- // local-only, no auth needed — safe before sign-in even resolves
+ensureFavoritesPlaylist(); // local-only, no auth needed — safe before sign-in even resolves
 
 (async function init() {
   try {

@@ -62,9 +62,7 @@ export async function ensureLibraryLoaded() {
 // itself no-ops if it's already running or a scan is in progress, so every
 // "library just became available" path (cache hit, fresh scan, restore) can
 // call this without coordinating.
-export let indexState = "idle";
-
- // idle | running | done | stopped | datasaver
+export let indexState = "idle"; // idle | running | done | stopped | datasaver
 
 export function kickOffIndexing(force) {
   updateRescanButtonUI();

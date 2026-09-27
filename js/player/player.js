@@ -277,12 +277,12 @@ export function restorePlaybackState() {
 }
 
 export const player = {
-  onTrackChange: null, // callback(item) set by app.js
-  onPlayStateChange: null, // callback(isPlaying) set by app.js
-  onTimeUpdate: null, // callback(currentTime, duration) set by app.js
-  onStatus: null, // callback(message) set by app.js, used for loading/error feedback
-  onShuffleRepeatChange: null, // callback(shuffleOn, repeatMode) set by app.js
-  onRealTags: null, // callback({artist, album, title}) set by app.js — real ID3 data for the current track
+  onTrackChange: null, // callback(item) set by ui/playerUI.js
+  onPlayStateChange: null, // callback(isPlaying) set by ui/playerUI.js
+  onTimeUpdate: null, // callback(currentTime, duration) set by ui/playerUI.js
+  onStatus: null, // callback(message) set by ui/playerUI.js, used for loading/error feedback
+  onShuffleRepeatChange: null, // callback(shuffleOn, repeatMode) set by ui/playerUI.js
+  onRealTags: null, // callback({artist, album, title}) set by ui/playerUI.js — real ID3 data for the current track
 };
 
 const MEDIA_ERROR_NAMES = {
@@ -636,7 +636,7 @@ export function getUpcomingTracks(maxCount) {
   return upcoming;
 }
 
-// Commits a drag-reorder of the "Up Next" list (app.js's enableQueueDragReorder)
+// Commits a drag-reorder of the "Up Next" list (enableQueueDragReorder in ui/detailOverlay.js)
 // — orderedQueueIndices is the new order for everything after the current
 // track. History (orderPos and anything before it) is left untouched.
 // Session-only, same as shuffle order itself: never persisted.

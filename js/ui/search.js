@@ -17,9 +17,7 @@ import { openDetailList } from "./detailOverlay.js";
 // line while artist names are still being read in the background.
 const SEARCH_SONG_LIMIT = 200;
 
-let searchView = "home";
-
- // home | artists | results — what "Refresh" should redraw
+let searchView = "home"; // home | artists | results — what "Refresh" should redraw
 
 el.searchBtn.addEventListener("click", async () => {
   el.searchOverlay.classList.remove("hidden");

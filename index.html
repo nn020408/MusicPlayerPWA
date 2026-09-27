@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://login.microsoftonline.com" crossorigin />
   <script>
     // Applies the saved color theme before first paint — doing this in
-    // app.js instead (loaded at the end of body) would show a flash of
+    // main.js instead (an ES module, which only runs once the page is parsed) would show a flash of
     // Midnight (the default) before switching to whatever's saved.
     (function () {
       try {
@@ -29,7 +29,7 @@
 <body class="audio-paused">
 
   <!-- Shown by default (see #login-screen below starting hidden) for exactly
-       as long as init() (app.js) takes to check whether a Microsoft account
+       as long as init() (js/main.js) takes to check whether a Microsoft account
        is already signed in — without this, the login screen itself was what
        painted first on every cold start (and every reload the OS forces
        after reclaiming a backgrounded WebView's memory), flashing "sign in"
@@ -156,7 +156,7 @@
 
     <!-- Multi-select action bar — occupies the exact same fixed slot as the
          mini player below (never shown at the same time as it, see
-         .select-mode-hidden in app.js). -->
+         .select-mode-hidden in js/ui/select.js). -->
     <div id="select-action-bar" class="select-bar hidden">
       <div id="select-count-label" class="select-count">0 selected</div>
       <div class="select-bar-actions">
@@ -187,7 +187,7 @@
   </section>
 
   <!-- First-time intro: shown once before the onboarding folder picker (see
-       showApp() in app.js), reachable again later via Settings > "Show
+       showApp() in js/main.js), reachable again later via Settings > "Show
        welcome guide again". Explains streaming/no-offline-playback, the
        two-phase library scan, and the OneDrive/backup risk, then offers
        either restoring a prior backup or continuing fresh into the folder
@@ -263,7 +263,7 @@
     </div>
     <!-- Occupies the exact same spot as .full-player-art above — toggled by
          lyrics-btn, never shown at the same time as the art (see
-         toggleLyricsView in app.js). -->
+         toggleLyricsView in js/ui/lyrics.js). -->
     <div id="lyrics-panel" class="lyrics-panel hidden"></div>
     <div class="full-player-meta">
       <h2 id="full-title">—</h2>
@@ -360,7 +360,7 @@
   <script src="js/vendor/capacitor-media-session.js"></script>
   <script src="js/vendor/capacitor-browser.js"></script>
   <script src="js/vendor/capacitor-app.js"></script>
-  <!-- Filesystem + Share: only used by exportBackup() (app.js) on Android,
+  <!-- Filesystem + Share: only used by exportBackup() (js/ui/backup.js) on Android,
        where the plain web <a download> trick doesn't work — Android's
        WebView doesn't reliably implement download-attribute handling for
        blob: URLs the way a real browser does. -->

@@ -1,15 +1,15 @@
 // The player screens: mini player, full player, artwork, and how they react to
 // what the player reports.
 
-import { formatTime } from "../core/text.js";
 import { el } from "../core/dom.js";
+import { formatTime } from "../core/text.js";
 import { getThumbnailUrl } from "../data/graph.js";
-import { audioEl, currentTrack, cycleRepeat, playNext, playPause, playPrevious, player, seekTo, toggleShuffle } from "../player/player.js";
-import { hideToast, showToast } from "./toast.js";
-import { paintFallbackArt } from "./fallbackArt.js";
+import { audioEl, currentTrack, cycleRepeat, player, playNext, playPause, playPrevious, seekTo, toggleShuffle } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
-import { updateNowPlayingRows } from "./trackRow.js";
+import { paintFallbackArt } from "./fallbackArt.js";
 import { cleanTrackTitle, closeLyricsView, fieldMatchScore, lyricsViewActive, primaryArtist, provideRealTags, showLyricsForCurrentTrack, startTrackTags, updateActiveLyricsLine } from "./lyrics.js";
+import { hideToast, showToast } from "./toast.js";
+import { updateNowPlayingRows } from "./trackRow.js";
 import { openUpNextView } from "./upNext.js";
 
 // Only tried once neither OneDrive's thumbnail nor the file's own embedded
@@ -38,9 +38,7 @@ function scoreArtworkCandidate(candidate, wantTitle, wantArtist) {
   return score;
 }
 
-const ARTWORK_MATCH_THRESHOLD = 4;
-
- // same bar as lyrics — an exact title alone isn't enough without the artist agreeing too
+const ARTWORK_MATCH_THRESHOLD = 4; // same bar as lyrics — an exact title alone isn't enough without the artist agreeing too
 
 // Last resort: look up the song by artist/title in Apple's public music
 // catalog. This is the only art source that leaves the app/OneDrive — it's a

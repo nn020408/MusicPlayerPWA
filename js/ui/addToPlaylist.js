@@ -1,13 +1,12 @@
 // The "add to playlist" dialog.
 
-import { escapeHtml } from "../core/text.js";
 import { el } from "../core/dom.js";
-import { FAVORITES_PLAYLIST_ID, addTracksToPlaylist, createPlaylist, loadPlaylists } from "../data/playlists.js";
+import { escapeHtml } from "../core/text.js";
+import { addTracksToPlaylist, createPlaylist, FAVORITES_PLAYLIST_ID, loadPlaylists } from "../data/playlists.js";
 import { showToast } from "./toast.js";
 
 let pendingTracksForPlaylist = [];
 
-// ---------- Add-to-playlist modal ----------
 // Accepts a single track or an array (e.g. every song found under a folder).
 export function openAddToPlaylistModal(trackOrTracks) {
   pendingTracksForPlaylist = Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks];

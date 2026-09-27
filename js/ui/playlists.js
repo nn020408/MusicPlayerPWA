@@ -1,8 +1,8 @@
 // The playlists screen and the rename / delete / clear menu on each playlist.
 
-import { escapeHtml } from "../core/text.js";
 import { el } from "../core/dom.js";
-import { FAVORITES_PLAYLIST_ID, clearPlaylist, createPlaylist, deletePlaylist, loadPlaylists, renamePlaylist } from "../data/playlists.js";
+import { escapeHtml } from "../core/text.js";
+import { clearPlaylist, createPlaylist, deletePlaylist, FAVORITES_PLAYLIST_ID, loadPlaylists, renamePlaylist } from "../data/playlists.js";
 import { openDetailList } from "./detailOverlay.js";
 
 function renderPlaylistsList() {

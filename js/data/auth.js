@@ -13,7 +13,7 @@
 //   nativeMediaSession() in player.js for the same isNative() pattern.
 //
 // Both sides expose the same five functions (initAuth, signIn, signOut,
-// getAccessToken, getActiveAccount) so js/app.js and js/graph.js need no
+// getAccessToken, getActiveAccount) so the UI and js/data/graph.js need no
 // platform-specific code at all.
 
 
@@ -255,7 +255,7 @@ async function nativeGetAccessToken() {
   }
 }
 
-// ---------- Public API — picks a side, used by app.js / graph.js ----------
+// ---------- Public API — picks a side, used by the UI and graph.js ----------
 
 export function initAuth() {
   return isNative() ? nativeInitAuth() : webInitAuth();

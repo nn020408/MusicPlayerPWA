@@ -17,9 +17,7 @@ const LONG_PRESS_MS = 480;
 
 export let selectMode = false;
 
-export const selectedItems = new Map();
-
- // "folder:id" | "track:id" -> { type, id, name, data }
+export const selectedItems = new Map(); // "folder:id" | "track:id" -> { type, id, name, data }
 
 export function selectKey(type, id) {
   return type + ":" + id;
@@ -199,7 +197,7 @@ el.selectAddPlaylistBtn.addEventListener("click", async () => {
       showToast("No songs found in that selection");
       return;
     }
-    openAddToPlaylistModal(tracks); // already accepts an array — see app.js above
+    openAddToPlaylistModal(tracks); // takes an array as well as a single track
   } catch (err) {
     console.error(err);
     exitSelectMode();

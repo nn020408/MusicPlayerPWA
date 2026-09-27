@@ -13,9 +13,7 @@ const lyricsCache = new Map();
 
 export let lyricsViewActive = false;
 
-let currentLyrics = null;
-
- // { plain, synced: [{time,text}]|null, instrumental } for whatever's rendered now
+let currentLyrics = null; // { plain, synced: [{time,text}]|null, instrumental } for whatever's rendered now
 // The real embedded tag read (id3.js), captured in player.onRealTags below —
 // this is the exact title/artist actually shown on screen, and a more
 // reliable match target than item.audio (OneDrive's lighter folder-listing

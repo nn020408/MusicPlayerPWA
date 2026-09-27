@@ -15,7 +15,6 @@ export function openFolderActionsModal(folder) {
   el.folderActionsModal.classList.remove("hidden");
 }
 
-// ---------- Folder actions (3-dot menu on a folder row) ----------
 el.folderActionsCancelBtn.addEventListener("click", () => el.folderActionsModal.classList.add("hidden"));
 
 el.folderPlayBtn.addEventListener("click", async () => {

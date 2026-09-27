@@ -1,11 +1,11 @@
 // The song row every list uses (folder view, search results, playlists, queue).
 
-import { escapeHtml } from "../core/text.js";
 import { el } from "../core/dom.js";
+import { escapeHtml } from "../core/text.js";
 import { libraryArtistFor } from "../data/library.js";
 import { currentTrack } from "../player/player.js";
 import { libraryEvents } from "./libraryWork.js";
-import { enterSelectMode, selectKey, selectMode, selectedItems, setupLongPress, toggleItemSelection } from "./select.js";
+import { enterSelectMode, selectedItems, selectKey, selectMode, setupLongPress, toggleItemSelection } from "./select.js";
 
 // Lists stay fast: the artist line comes from the library index (the
 // background artist read), never a per-row fetch. When a song's artist isn't
