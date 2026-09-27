@@ -1,5 +1,11 @@
 {
   "name": "nubeplayer-tools",
   "private": true,
-  "dependencies": { "music-metadata": "^11.0.0" }
+  "dependencies": {
+    "music-metadata": "^11.0.0"
+  },
+  "devDependencies": {
+    "acorn": "^8.18.0",
+    "eslint-scope": "^9.1.2"
+  }
 }

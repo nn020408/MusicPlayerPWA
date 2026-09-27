@@ -2,6 +2,8 @@
 // download URLs. Graph's @microsoft.graph.downloadUrl is a pre-authenticated,
 // short-lived (~1hr) direct link — no auth header needed to actually stream it.
 
+import { getAccessToken } from "./auth.js";
+
 const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 
 // Retries `attempt()` with exponential backoff instead of failing outright —
@@ -12,7 +14,7 @@ const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 // trigger — a phone reporting a connected-but-flaky signal never fires
 // "offline" in the first place, so plain timed backoff is what actually
 // recovers here.
-async function retryWithBackoff(attempt, { maxAttempts = 6, baseDelayMs = 2000, maxDelayMs = 20000, onRetry } = {}) {
+export async function retryWithBackoff(attempt, { maxAttempts = 6, baseDelayMs = 2000, maxDelayMs = 20000, onRetry } = {}) {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       return await attempt();
@@ -52,7 +54,7 @@ const folderListCache = new Map();
 // and synced by OneDrive: every song's artist, read from the local files.
 const ARTISTS_FILE_NAME = "nubeplayer-artists.json";
 
-function clearFolderListCache() {
+export function clearFolderListCache() {
   folderListCache.clear();
 }
 
@@ -64,7 +66,7 @@ function clearFolderListCache() {
 // Graph paginates children (~200 per page) via @odata.nextLink — folders
 // with more files than that would silently lose items if we only read the
 // first page, so we follow every page until exhausted.
-function listFolder(folderId, { priority } = {}) {
+export function listFolder(folderId, { priority } = {}) {
   if (folderListCache.has(folderId)) return folderListCache.get(folderId);
 
   const promise = (async () => {
@@ -104,7 +106,7 @@ function listFolder(folderId, { priority } = {}) {
 // tracks is routine and already handled (that track just stays unresolved),
 // not a real problem worth surfacing in the user-visible error log the way a
 // genuine playback failure is.
-async function refreshDownloadUrl(itemId, { silent, priority } = {}) {
+export async function refreshDownloadUrl(itemId, { silent, priority } = {}) {
   const data = await graphGet(`/me/drive/items/${itemId}`, { priority });
   const url = data["@microsoft.graph.downloadUrl"];
   if (!url) {
@@ -115,7 +117,7 @@ async function refreshDownloadUrl(itemId, { silent, priority } = {}) {
 }
 
 // Always fetch fresh — download URLs are short-lived and per-request anyway.
-async function getDownloadUrl(item, options) {
+export async function getDownloadUrl(item, options) {
   return refreshDownloadUrl(item.id, options);
 }
 
@@ -128,7 +130,7 @@ async function getDownloadUrl(item, options) {
 // nearly the same time, they share one network request instead of firing two.
 const thumbnailCache = new Map();
 
-function getThumbnailUrl(itemId) {
+export function getThumbnailUrl(itemId) {
   if (thumbnailCache.has(itemId)) return thumbnailCache.get(itemId);
   const promise = (async () => {
     try {

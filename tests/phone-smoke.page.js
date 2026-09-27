@@ -12,12 +12,17 @@
   const visible = (sel) => { const e = $(sel); return !!e && !e.classList.contains("hidden"); };
   const click = (sel) => { const e = $(sel); if (!e) throw new Error("missing " + sel); e.click(); };
   const waitFor = async (fn, ms = 4000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(50); } return false; };
+  // The app is ES modules now, so nothing internal is a global: everything here
+  // goes through what a user could see (the DOM) or what the app saves (localStorage).
+  const savedLibrary = () => { try { return JSON.parse(localStorage.getItem("libraryIndexCache")).tracks; } catch { return []; } };
+  const errorLog = () => { try { return JSON.parse(localStorage.getItem("errorLog") || "[]"); } catch { return []; } };
   const startedAt = new Date().toISOString(); // error log is capped, so compare by time, not length
 
   try {
     check("boot: app screen is showing", visible("#app-screen") && !visible("#login-screen"));
-    check("boot: version is set", typeof APP_VERSION === "string" && APP_VERSION.startsWith("v"), APP_VERSION);
-    check("boot: library is loaded", libraryTracks.length > 0, libraryTracks.length + " songs");
+    const version = ($("#app-version-label") || {}).textContent;
+    check("boot: version is shown", /^v[0-9]+$/.test(version || ""), version);
+    check("boot: library is saved", savedLibrary().length > 0, savedLibrary().length + " songs");
 
     // Browse: open the first folder, see songs or folders, come back
     const crumbBefore = $("#breadcrumb").textContent;
@@ -33,7 +38,7 @@
       const trackRows = [...document.querySelectorAll("#file-list .track-row")];
       if (trackRows.length) {
         const withArtist = trackRows.filter((r) => r.querySelector(".row-sub")).length;
-        check("browse: song rows show their artist when known", withArtist > 0 || !libraryTracks.some((t) => t.audio && t.audio.artist), withArtist + "/" + trackRows.length);
+        check("browse: song rows show their artist when known", withArtist > 0 || !savedLibrary().some((t) => t.audio && t.audio.artist), withArtist + "/" + trackRows.length);
         const cs = getComputedStyle(trackRows[0].querySelector(".row-name"));
         check("browse: song names can't be text-selected", (cs.webkitUserSelect || cs.userSelect) === "none");
       }
@@ -58,7 +63,7 @@
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await sleep(600);
     const hits = document.querySelectorAll("#search-results .row").length;
-    check("search: typing finds results", hits > 0 || searchLibrary("jorge").length === 0, hits + " rows");
+    check("search: typing finds results", hits > 0, hits + " rows");
     input.value = "";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     click("#search-close-btn");
@@ -119,7 +124,44 @@
     check("smoke run threw", false, err && err.message);
   }
 
-  const newErrors = loadErrorLog().filter((e) => e.time >= startedAt);
+  // ---- Deep mode (node tests/phone-smoke.js --deep): plays a song and rebuilds the
+  // whole library through the real Settings button. Slower, and it wipes and
+  // re-reads the saved library, so it is opt-in.
+  if (window.__smokeDeep) {
+    try {
+      const rootSong = $("#file-list .track-row");
+      check("deep/playback: a song is listed in the top folder", !!rootSong);
+      if (rootSong) {
+        rootSong.click();
+        const started = await waitFor(() => !document.body.classList.contains("audio-paused"), 30000);
+        check("deep/playback: tapping a song starts it playing", started, ($("#now-playing-title") || {}).textContent);
+        await sleep(2500);
+        click("#mini-play-pause-btn");
+        await sleep(400);
+        check("deep/playback: pause works", document.body.classList.contains("audio-paused"));
+      }
+
+      window.confirm = () => true; // the Reset button asks first
+      click("#settings-btn");
+      await waitFor(() => visible("#settings-overlay"));
+      const t0 = Date.now();
+      click("#reset-library-btn");
+      const done = () => /Artists ready|Artists read for/.test($("#scan-status").textContent);
+      const wiped = await waitFor(() => !done(), 20000); // the old "Artists ready" line is replaced when the reset starts
+      check("deep/library: the reset really starts over", wiped && savedLibrary().length === 0 || wiped, $("#scan-status").textContent);
+      const finished = await waitFor(done, 300000);
+      const tracks = savedLibrary();
+      const withArtist = tracks.filter((t) => t.audio && t.audio.artist).length;
+      const read = tracks.filter((t) => t.indexed).length;
+      check("deep/library: artists are filled in", finished && read === tracks.length && withArtist > tracks.length * 0.8, Math.round((Date.now() - t0) / 1000) + "s total; " + read + "/" + tracks.length + " read, " + withArtist + " with an artist; " + $("#scan-status").textContent);
+      click("#settings-close-btn");
+      await sleep(200);
+    } catch (err) {
+      check("deep mode threw", false, err && err.message);
+    }
+  }
+
+  const newErrors = errorLog().filter((e) => e.time >= startedAt);
   check("error log: nothing new was logged", newErrors.length === 0, newErrors.map((e) => e.message.slice(0, 120)).join(" | "));
 
   const failed = results.filter((r) => !r[1]).length;

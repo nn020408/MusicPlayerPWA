@@ -1,4 +1,5 @@
 const fs = require("fs"), vm = require("vm");
+const { flat } = require("./helpers/flatten");
 process.chdir(require("path").join(__dirname, ".."));
 const store = {};
 const mk = () => ({ _l: {}, addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); }, removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter((x) => x !== f); }, fire(t) { (this._l[t] || []).slice().forEach((f) => f()); } });
@@ -15,7 +16,7 @@ ctx.listFolder = async (id) => (id === "root" ? { folders: [{ id: "f" }], tracks
 let graphUrlCalls = 0;
 ctx.getDownloadUrl = async (t) => { graphUrlCalls++; return "u/" + t.id + "?fresh"; };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let bad = 0;

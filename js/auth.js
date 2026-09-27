@@ -16,7 +16,9 @@
 // getAccessToken, getActiveAccount) so js/app.js and js/graph.js need no
 // platform-specific code at all.
 
-function isNative() {
+import { APP_CONFIG } from "./config.js";
+
+export function isNative() {
   return !!(window.Capacitor && window.Capacitor.isNativePlatform());
 }
 
@@ -253,22 +255,22 @@ async function nativeGetAccessToken() {
 
 // ---------- Public API — picks a side, used by app.js / graph.js ----------
 
-function initAuth() {
+export function initAuth() {
   return isNative() ? nativeInitAuth() : webInitAuth();
 }
 
-function getActiveAccount() {
+export function getActiveAccount() {
   return isNative() ? nativeGetActiveAccount() : webGetActiveAccount();
 }
 
-function signIn() {
+export function signIn() {
   return isNative() ? nativeSignIn() : webSignIn();
 }
 
-function signOut() {
+export function signOut() {
   return isNative() ? nativeSignOut() : webSignOut();
 }
 
-function getAccessToken() {
+export function getAccessToken() {
   return isNative() ? nativeGetAccessToken() : webGetAccessToken();
 }

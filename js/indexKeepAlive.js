@@ -4,19 +4,21 @@
 // version there is no plugin and this does nothing, so the job still pauses in a
 // background tab. The native side is IndexKeepAlivePlugin / IndexKeepAliveService.
 
+import { isNative } from "./auth.js";
+
 const indexKeepAlive = isNative() && window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin("IndexKeepAlive") : null;
 let indexKeepAliveActive = false; // the service is confirmed running
 let indexKeepAliveRequested = false;
 let indexKeepAliveTextAt = 0;
 
-function isIndexKeepAliveActive() {
+export function isIndexKeepAliveActive() {
   return indexKeepAliveActive;
 }
 
 // Called with every progress update from the indexer: starts the service when
 // work begins, refreshes its notification text (at most every 5s), and stops it
 // when work ends.
-function syncIndexKeepAlive(state, done, total, pct) {
+export function syncIndexKeepAlive(state, done, total, pct) {
   if (!indexKeepAlive) return;
   const working = state === "running" || state === "throttled";
   if (working && !indexKeepAliveRequested) {

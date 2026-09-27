@@ -1,4 +1,5 @@
 const fs = require("fs"), vm = require("vm");
+const { flat } = require("./helpers/flatten");
 process.chdir(require("path").join(__dirname, ".."));
 
 // A stub that accepts any property access / call, so top-level wiring code runs.
@@ -45,9 +46,10 @@ vm.createContext(ctx);
 
 const order = ["js/errorlog.js", "js/config.js", "js/auth.js", "js/graph.js", "js/library.js", "js/playlists.js", "js/id3.js", "js/indexKeepAlive.js", "js/indexer.js", "js/player.js", "js/app.js"];
 const html = fs.readFileSync("index.html", "utf8");
-const inHtml = [...html.matchAll(/<script src="(js\/[A-Za-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]).filter((f) => !f.includes("vendor"));
-if (JSON.stringify(inHtml) !== JSON.stringify(order)) { console.log("FAIL script order in index.html differs:\n ", inHtml.join(", "), "\n ", order.join(", ")); process.exit(1); }
-console.log("PASS index.html loads scripts in the expected order (incl. indexer.js before player/app)");
+const moduleTags = [...html.matchAll(/<script type="module" src="(js\/[A-Za-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]);
+const classicAppTags = [...html.matchAll(/<script src="(js\/[A-Za-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]).filter((f) => !f.includes("vendor"));
+if (JSON.stringify(moduleTags) !== JSON.stringify(["js/app.js"]) || classicAppTags.length) { console.log("FAIL index.html should load one module entry (js/app.js) and no classic app scripts:", moduleTags, classicAppTags); process.exit(1); }
+console.log("PASS index.html loads the app as one ES module entry (js/app.js)");
 
 const swFiles = fs.readFileSync("sw.js", "utf8");
 for (const f of order.slice(1)) if (!swFiles.includes("./" + f)) { console.log("FAIL sw.js is missing", f); process.exit(1); }
@@ -55,7 +57,7 @@ console.log("PASS every script is in the service-worker cache list");
 
 process.on("unhandledRejection", () => {}); // async init() against the stub is allowed to fail quietly
 for (const f of order) {
-  try { vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f }); }
+  try { vm.runInContext(flat(f), ctx, { filename: f }); }
   catch (e) { console.log("FAIL loading " + f + ": " + e.message); process.exit(1); }
 }
 console.log("PASS all scripts executed their top-level code with no error");

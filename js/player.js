@@ -1,7 +1,12 @@
 // Streaming audio playback + lock-screen / notification controls via the
 // Media Session API, plus shuffle/repeat queue management.
 
-const audioEl = new Audio();
+import { isNative } from "./auth.js";
+import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "./graph.js";
+import { slimTrack } from "./library.js";
+import { readId3Tags } from "./id3.js";
+
+export const audioEl = new Audio();
 audioEl.preload = "auto";
 
 // ---------- Background execution keep-alive (Android only) ----------
@@ -19,7 +24,7 @@ audioEl.preload = "auto";
 // audio for the whole time playback is *intended* to be on (tracked by
 // wantsToPlay, not audioEl.paused, so it survives that gap), so the retry
 // timers keep firing straight through it instead of freezing.
-let wantsToPlay = false;
+export let wantsToPlay = false;
 let keepAliveEl = null;
 
 // Synthesized at runtime rather than a hardcoded blob, so what it actually
@@ -87,12 +92,12 @@ function nativeMediaSession() {
   return window.Capacitor && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins.MediaSession;
 }
 
-let queue = [];
-let queueIndex = -1;
+export let queue = [];
+export let queueIndex = -1;
 let playOrder = []; // sequence of indices into `queue` — the actual play order
 let orderPos = -1; // position within playOrder
-let shuffleOn = false;
-let repeatMode = "off"; // "off" | "all" | "one"
+export let shuffleOn = false;
+export let repeatMode = "off"; // "off" | "all" | "one"
 let playStartedAt = 0; // ms timestamp, used to guess when a downloadUrl may have expired
 let currentArtBlobUrl = null; // tracks the last embedded-art blob URL so we can revoke it
 let currentBlobUrl = null; // tracks the audio object URL backing audioEl.src (if any), so we can revoke it once we move off it
@@ -241,7 +246,7 @@ function savePlaybackState(overridePosition) {
 // Restores queue/position state only — does NOT fetch a download URL or
 // start audio, so reopening the app doesn't use data until you actually tap
 // play. Returns the track to display, or null if there's nothing saved.
-function restorePlaybackState() {
+export function restorePlaybackState() {
   try {
     const raw = localStorage.getItem(PLAYBACK_STATE_KEY);
     if (!raw) return null;
@@ -264,7 +269,7 @@ function restorePlaybackState() {
   }
 }
 
-const player = {
+export const player = {
   onTrackChange: null, // callback(item) set by app.js
   onPlayStateChange: null, // callback(isPlaying) set by app.js
   onTimeUpdate: null, // callback(currentTime, duration) set by app.js
@@ -298,7 +303,7 @@ function buildOrder(startIndex) {
 }
 
 // items: array of track objects. startIndex: which one to start playing.
-function setQueue(items, startIndex) {
+export function setQueue(items, startIndex) {
   queue = items;
   queueIndex = startIndex;
   buildOrder(startIndex);
@@ -312,7 +317,7 @@ function setQueue(items, startIndex) {
 // If nothing's playing/queued yet, there's nothing to append after, so this
 // just starts playing from the first added track instead — matching what
 // tapping any of them individually would do in that state.
-function addToQueue(tracks) {
+export function addToQueue(tracks) {
   if (!tracks || !tracks.length) return;
   if (queue.length === 0) {
     setQueue(tracks, 0);
@@ -324,18 +329,18 @@ function addToQueue(tracks) {
   playOrder = playOrder.concat(tracks.map((_, i) => startLength + i));
 }
 
-function toggleShuffle() {
+export function toggleShuffle() {
   shuffleOn = !shuffleOn;
   buildOrder(queueIndex);
   player.onShuffleRepeatChange && player.onShuffleRepeatChange(shuffleOn, repeatMode);
 }
 
-function cycleRepeat() {
+export function cycleRepeat() {
   repeatMode = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
   player.onShuffleRepeatChange && player.onShuffleRepeatChange(shuffleOn, repeatMode);
 }
 
-async function playCurrent() {
+export async function playCurrent() {
   const item = queue[queueIndex];
   if (!item) return;
   setWantsToPlay(true);
@@ -500,7 +505,7 @@ async function playCurrent() {
 
 // Jump straight to a specific track within the current queue (e.g. user
 // tapped a row in a list).
-async function playIndex(index) {
+export async function playIndex(index) {
   if (index < 0 || index >= queue.length) return;
   queueIndex = index;
   orderPos = playOrder.indexOf(index);
@@ -559,7 +564,7 @@ function userPause() {
   }
 }
 
-function playPause() {
+export function playPause() {
   if (hasPendingResume) {
     playCurrent(); // nothing loaded yet after a restore — actually start playback
     return;
@@ -584,12 +589,12 @@ function advanceOrderPos(delta) {
   return true;
 }
 
-function playNext() {
+export function playNext() {
   if (advanceOrderPos(1)) playCurrent();
   else setWantsToPlay(false); // end of queue, repeat off — nothing left to protect
 }
 
-function playPrevious() {
+export function playPrevious() {
   if (audioEl.currentTime > 3) {
     audioEl.currentTime = 0; // restart current track, like most players
   } else if (advanceOrderPos(-1)) {
@@ -601,7 +606,7 @@ function playPrevious() {
 // queue was built from a folder/search/playlist that's already loaded, and
 // shuffle order is computed once by buildOrder), so this is just array
 // indexing with no network call and no measurable cost either way.
-function getUpcomingTracks(maxCount) {
+export function getUpcomingTracks(maxCount) {
   // Repeat-one plays only the current song again — there's nothing else
   // "up next" to show, so this is deliberately empty rather than [current].
   if (repeatMode === "one") return [];
@@ -628,11 +633,11 @@ function getUpcomingTracks(maxCount) {
 // — orderedQueueIndices is the new order for everything after the current
 // track. History (orderPos and anything before it) is left untouched.
 // Session-only, same as shuffle order itself: never persisted.
-function setUpcomingOrder(orderedQueueIndices) {
+export function setUpcomingOrder(orderedQueueIndices) {
   playOrder = playOrder.slice(0, orderPos + 1).concat(orderedQueueIndices);
 }
 
-function seekTo(seconds) {
+export function seekTo(seconds) {
   audioEl.currentTime = seconds;
   if (audioEl.error) {
     // Broken/mid-network-recovery — setting currentTime above on a genuinely
@@ -652,7 +657,7 @@ function seekTo(seconds) {
 // and queue don't keep showing the previous session's (or previous account's)
 // track through a sign-out/sign-in cycle. Storage-level state (lastPlaybackState)
 // is cleared separately by the caller; this only handles the live runtime state.
-function resetPlayer() {
+export function resetPlayer() {
   setWantsToPlay(false);
   audioEl.pause();
   audioEl.removeAttribute("src");

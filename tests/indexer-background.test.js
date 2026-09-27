@@ -1,4 +1,5 @@
 const fs = require("fs"), vm = require("vm");
+const { flat } = require("./helpers/flatten");
 process.chdir(require("path").join(__dirname, ".."));
 const store = {};
 const doc = { hidden: true, _l: {}, addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); }, removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter((x) => x !== f); }, fire(t) { (this._l[t] || []).slice().forEach((f) => f()); } };
@@ -11,7 +12,7 @@ const ctx = { isNative: () => false,
   getDownloadUrl: async () => "u", readArtist: async () => "Artist",
 };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 const fresh = () => run(`libraryTracks = [makeTrack({id:'a',name:'A.mp3'},'f'), makeTrack({id:'b',name:'B.mp3'},'f')]; indexFailedIds = new Set();`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

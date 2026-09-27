@@ -1,7 +1,9 @@
 // Runs tests/phone-smoke.page.js inside the app on a USB-connected Android
 // phone (debug build) and prints a pass/fail report.
 //
-//   node tests/phone-smoke.js
+//   node tests/phone-smoke.js          quick UI check (non-destructive)
+//   node tests/phone-smoke.js --deep   also plays a song and rebuilds the whole library
+//                                      (wipes and re-reads the saved library)
 //
 // Needs: adb on PATH or in the default Android SDK location, USB debugging on,
 // and the debug APK installed (android-app: npm run sync, gradlew assembleDebug,
@@ -40,7 +42,9 @@ async function main() {
     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
     const reply = await new Promise((resolve) => {
       ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id === 1) resolve(d.result); };
-      ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: fs.readFileSync(path.join(__dirname, "phone-smoke.page.js"), "utf8"), returnByValue: true, awaitPromise: true } }));
+      const deep = process.argv.includes("--deep") ? "window.__smokeDeep = true;\n" : "";
+      const expression = deep + fs.readFileSync(path.join(__dirname, "phone-smoke.page.js"), "utf8");
+      ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true, awaitPromise: true } }));
     });
     ws.close();
     if (reply.exceptionDetails) throw new Error("Smoke script crashed: " + JSON.stringify(reply.exceptionDetails.exception && reply.exceptionDetails.exception.description));

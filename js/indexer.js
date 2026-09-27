@@ -14,6 +14,12 @@
 //     never counted against it.
 //   - Resumable; progress saved as it goes; stoppable via Settings.
 
+import { getDownloadUrl, listFolder, retryWithBackoff } from "./graph.js";
+import { abortScan, buildSearchText, cacheLibrary, getLibraryRootId, invalidateArtistsCache, isScanning, libraryTracks, runWithConcurrency } from "./library.js";
+import { readArtist } from "./id3.js";
+import { isIndexKeepAliveActive } from "./indexKeepAlive.js";
+import { wantsToPlay } from "./player.js";
+
 const INDEX_CONCURRENCY = 6; // in flight at once; the pacing gap below is what actually limits the rate
 const INDEX_SAVE_EVERY = 100; // songs between saves of the library cache
 const INDEX_NOTIFY_EVERY = 25; // songs between progress callbacks
@@ -82,22 +88,22 @@ async function waitIndexCooldown(signal) {
 // what you're looking at is read first.
 let indexPriorityFolderId = null;
 
-function setIndexPriorityFolder(folderId) {
+export function setIndexPriorityFolder(folderId) {
   indexPriorityFolderId = folderId;
 }
 
 // Owned here: whether artists are being read right now, and how to stop it.
-let isIndexing = false;
+export let isIndexing = false;
 let indexAbortController = null;
 
 // A scan and an indexing run are the two halves of "library work"; Settings'
 // Stop button and the busy checks treat them as one.
-function stopLibraryWork() {
+export function stopLibraryWork() {
   abortScan();
   if (indexAbortController) indexAbortController.abort();
 }
 
-function isLibraryWorkActive() {
+export function isLibraryWorkActive() {
   return isScanning || isIndexing;
 }
 // Songs that really failed during the CURRENT run: skipped for the rest of it
@@ -113,12 +119,12 @@ function isIndexSkipped(id) {
 
 // Forgets failures — used by "Reset scan" and the Resume button, where every
 // song deserves a fresh attempt.
-function resetIndexState() {
+export function resetIndexState() {
   indexFailedIds = new Set();
   indexFailCounts.clear();
 }
 
-function indexCounts() {
+export function indexCounts() {
   let done = 0;
   for (const t of libraryTracks) if (t.indexed) done++;
   return { done, total: libraryTracks.length };
@@ -276,7 +282,7 @@ async function indexOneFolder(folderId, signal, onSongDone) {
 // "stopped" | "datasaver". Resolves with the final state. options.force
 // starts even on data saver and forgives earlier failures (the user
 // explicitly asked, e.g. the Resume button).
-async function startIndexing(options = {}) {
+export async function startIndexing(options = {}) {
   const { force = false, onProgress } = options;
   if (isIndexing || isScanning || !libraryTracks.length) return "skipped";
   const notify = (state, extra) => onProgress && onProgress({ ...indexCounts(), state, ...extra });

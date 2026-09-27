@@ -1,4 +1,5 @@
 const fs = require("fs"), vm = require("vm");
+const { flat } = require("./helpers/flatten");
 process.chdir(require("path").join(__dirname, ".."));
 const store = {};
 const mk = () => ({ _l: {}, addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); }, removeEventListener(t, f) { this._l[t] = (this._l[t] || []).filter((x) => x !== f); } });
@@ -10,7 +11,7 @@ const raws = Array.from({ length: 30 }, (_, i) => ({ id: "s" + i, name: `S${i}.m
 ctx.listFolder = async (id) => (id === "root" ? { folders: [{ id: "f" }], tracks: [] } : { folders: [], tracks: raws });
 ctx.getDownloadUrl = async (t) => "u/" + t.id;
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0; const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };
 (async () => {

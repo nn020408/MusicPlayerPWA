@@ -1,5 +1,15 @@
 // Wires the UI to auth, the library index, playlists, and the player.
 
+import { clearErrorLog, loadErrorLog } from "./errorlog.js";
+import { APP_VERSION } from "./config.js";
+import { getActiveAccount, initAuth, isNative, signIn, signOut } from "./auth.js";
+import { clearFolderListCache, getThumbnailUrl, listFolder, retryWithBackoff } from "./graph.js";
+import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, getArtists, getLibraryRootLabel, isScanning, libraryArtistFor, libraryTracks, loadCachedLibrary, resetLibrary, runWithConcurrency, scanLibrary, searchArtists, searchLibrary, songsByArtistKey, syncArtistsFile } from "./library.js";
+import { FAVORITES_PLAYLIST_ID, addTracksToPlaylist, clearPlaylist, createPlaylist, deletePlaylist, ensureFavoritesPlaylist, loadPlaylists, removeTrackFromPlaylist, renamePlaylist, savePlaylists } from "./playlists.js";
+import { syncIndexKeepAlive } from "./indexKeepAlive.js";
+import { indexCounts, isIndexing, isLibraryWorkActive, resetIndexState, setIndexPriorityFolder, startIndexing, stopLibraryWork } from "./indexer.js";
+import { addToQueue, audioEl, cycleRepeat, getUpcomingTracks, playCurrent, playIndex, playNext, playPause, playPrevious, player, queue, queueIndex, repeatMode, resetPlayer, restorePlaybackState, seekTo, setQueue, setUpcomingOrder, shuffleOn, toggleShuffle } from "./player.js";
+
 const el = {
   loadingScreen: document.getElementById("loading-screen"),
   loginScreen: document.getElementById("login-screen"),

@@ -10,16 +10,18 @@
 //      you're looking at. Results are saved on each track (audio.artist +
 //      indexed) so it only ever has to happen once per song.
 
-const LIBRARY_CACHE_KEY = "libraryIndexCache";
-const DEFAULT_FOLDER_KEY = "defaultFolderPath"; // shared with the Folders tab's "default folder" setting
+import { listFolder, refreshDownloadUrl, retryWithBackoff } from "./graph.js";
 
-let libraryTracks = [];
+export const LIBRARY_CACHE_KEY = "libraryIndexCache";
+export const DEFAULT_FOLDER_KEY = "defaultFolderPath"; // shared with the Folders tab's "default folder" setting
+
+export let libraryTracks = [];
 // folderId -> path relative to the library root ("" for the root itself),
 // recorded by scanLibrary() so songs can be matched to the PC-made artists file.
 let libraryFolderPaths = {};
-let isScanning = false;
+export let isScanning = false;
 
-function getLibraryRootId() {
+export function getLibraryRootId() {
   try {
     const raw = localStorage.getItem(DEFAULT_FOLDER_KEY);
     if (!raw) return "root";
@@ -30,7 +32,7 @@ function getLibraryRootId() {
   }
 }
 
-function getLibraryRootLabel() {
+export function getLibraryRootLabel() {
   try {
     const raw = localStorage.getItem(DEFAULT_FOLDER_KEY);
     if (!raw) return "OneDrive (everything)";
@@ -48,7 +50,7 @@ function getLibraryRootLabel() {
 // and includes the artist.
 const LIBRARY_CACHE_VERSION = 7;
 
-function loadCachedLibrary() {
+export function loadCachedLibrary() {
   try {
     const raw = localStorage.getItem(LIBRARY_CACHE_KEY);
     if (!raw) return false;
@@ -64,7 +66,7 @@ function loadCachedLibrary() {
   }
 }
 
-function cacheLibrary(rootId) {
+export function cacheLibrary(rootId) {
   try {
     localStorage.setItem(
       LIBRARY_CACHE_KEY,
@@ -81,7 +83,7 @@ function cacheLibrary(rootId) {
 // the saved cache. Playlists, backups and the chosen music folder are not
 // touched. The next scanLibrary() then starts from nothing, so unlike a plain
 // rescan it keeps no previously read artists.
-function resetLibrary() {
+export function resetLibrary() {
   localStorage.removeItem(LIBRARY_CACHE_KEY);
   libraryTracks = [];
   libraryFolderPaths = {};
@@ -97,7 +99,7 @@ function normalizeText(s) {
   return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
-function buildSearchText(name, artist) {
+export function buildSearchText(name, artist) {
   return normalizeText(`${name.replace(/\.[^/.]+$/, "")} ${artist || ""}`);
 }
 
@@ -126,7 +128,7 @@ function makeTrack(t, folderId, prior) {
 }
 
 // Lightweight copy of an existing track, used for saved playback state.
-function slimTrack(t) {
+export function slimTrack(t) {
   const copy = { id: t.id, name: t.name, audio: t.audio ? { artist: t.audio.artist } : null, _searchText: t._searchText };
   if (t.folderId) copy.folderId = t.folderId;
   if (t.indexed) copy.indexed = true;
@@ -137,7 +139,7 @@ function slimTrack(t) {
 // in flight at once. `handler` returns an array of new items to add to the
 // queue (or nothing) — used here so discovering subfolders keeps feeding the
 // same pool instead of walking one folder at a time.
-function runWithConcurrency(concurrency, initialItems, handler) {
+export function runWithConcurrency(concurrency, initialItems, handler) {
   return new Promise((resolve, reject) => {
     const queue = [...initialItems];
     let index = 0;
@@ -177,11 +179,11 @@ const SCAN_CONCURRENCY = 5;
 // stopLibraryWork() stops this and artist indexing together).
 let scanAbortController = null;
 
-function abortScan() {
+export function abortScan() {
   if (scanAbortController) scanAbortController.abort();
 }
 
-async function scanLibrary(onProgress) {
+export async function scanLibrary(onProgress) {
   if (isScanning) return libraryTracks;
   isScanning = true;
   scanAbortController = new AbortController();
@@ -281,7 +283,7 @@ function applyArtistsFile(data) {
 // Never throws: any problem just leaves the songs for the background indexer.
 let artistsFileSync = null;
 
-function syncArtistsFile() {
+export function syncArtistsFile() {
   if (artistsFileSync) return artistsFileSync;
   if (!libraryTracks.some((t) => !t.indexed) || !Object.keys(libraryFolderPaths).length) return Promise.resolve(null);
   const attempt = (async () => {
@@ -314,7 +316,7 @@ function searchTokens(query) {
   return normalizeText(query).split(/\s+/).filter(Boolean);
 }
 
-function searchLibrary(query) {
+export function searchLibrary(query) {
   const tokens = searchTokens(query);
   if (!tokens.length) return [];
   return libraryTracks.filter((t) => tokens.every((tok) => t._searchText.includes(tok)));
@@ -347,7 +349,7 @@ function creditedArtists(raw) {
 
 let artistsCache = null;
 let artistByIdCache = null;
-function invalidateArtistsCache() {
+export function invalidateArtistsCache() {
   artistsCache = null;
   artistByIdCache = null;
 }
@@ -355,7 +357,7 @@ function invalidateArtistsCache() {
 // The artist for a song id, straight from the library ("" if unknown or not
 // read yet). Lists built from a raw OneDrive folder listing don't carry the
 // artist on their track objects, so rows look it up here.
-function libraryArtistFor(id) {
+export function libraryArtistFor(id) {
   if (!artistByIdCache) {
     artistByIdCache = new Map();
     for (const t of libraryTracks) if (t.audio && t.audio.artist) artistByIdCache.set(t.id, t.audio.artist);
@@ -365,7 +367,7 @@ function libraryArtistFor(id) {
 
 // [{key, name, count}] sorted by name. Each song counts under every artist
 // credited on it, like Spotify's "appears on".
-function getArtists() {
+export function getArtists() {
   if (artistsCache) return artistsCache;
   const map = new Map();
   for (const t of libraryTracks) {
@@ -388,7 +390,7 @@ function getArtists() {
   return artistsCache;
 }
 
-function searchArtists(query) {
+export function searchArtists(query) {
   const tokens = searchTokens(query);
   if (!tokens.length) return [];
   return getArtists()
@@ -396,7 +398,7 @@ function searchArtists(query) {
     .sort((a, b) => b.count - a.count);
 }
 
-function songsByArtistKey(key) {
+export function songsByArtistKey(key) {
   return libraryTracks
     .filter((t) => {
       const raw = t.audio && t.audio.artist;

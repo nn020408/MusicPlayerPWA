@@ -6,7 +6,7 @@
 const ERROR_LOG_KEY = "errorLog";
 const ERROR_LOG_MAX = 50;
 
-function loadErrorLog() {
+export function loadErrorLog() {
   try {
     return JSON.parse(localStorage.getItem(ERROR_LOG_KEY) || "[]");
   } catch {
@@ -14,7 +14,7 @@ function loadErrorLog() {
   }
 }
 
-function clearErrorLog() {
+export function clearErrorLog() {
   localStorage.removeItem(ERROR_LOG_KEY);
 }
 

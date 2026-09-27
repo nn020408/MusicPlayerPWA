@@ -1,4 +1,5 @@
 const fs = require("fs"), vm = require("vm");
+const { flat } = require("./helpers/flatten");
 process.chdir(require("path").join(__dirname, ".."));
 const store = {};
 const ctx = { isNative: () => false,
@@ -14,7 +15,7 @@ ctx.listFolder = async (id) => tree[id];
 ctx.getDownloadUrl = async (t) => "u/" + t.id;
 ctx.readArtist = async () => { reads++; return "Selena Gomez"; };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(fs.readFileSync(f, "utf8"), ctx);
+for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0;
 const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };

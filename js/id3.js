@@ -9,7 +9,7 @@
 // jsmediatags does its own efficient range-based reads when given a URL, so
 // this still doesn't download whole files.
 
-function readId3Tags(fileUrl) {
+export function readId3Tags(fileUrl) {
   return new Promise((resolve) => {
     jsmediatags.read(fileUrl, {
       onSuccess: (tag) => {
@@ -252,7 +252,7 @@ function readArtistFallback(url) {
   });
 }
 
-async function readArtist(url) {
+export async function readArtist(url) {
   const fast = await readArtistFast(url);
   return fast !== null ? fast : readArtistFallback(url);
 }
