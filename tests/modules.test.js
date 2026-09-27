@@ -23,7 +23,7 @@ const check = (name, ok, detail = "") => {
 const BROWSER_GLOBALS = new Set("window document console navigator localStorage sessionStorage location history fetch setTimeout clearTimeout setInterval clearInterval requestAnimationFrame cancelAnimationFrame Promise Map Set WeakMap WeakSet Array Object String Number Boolean Math JSON Date Error TypeError RangeError SyntaxError RegExp Symbol Uint8Array ArrayBuffer DataView URL URLSearchParams AbortController Blob FileReader TextDecoder TextEncoder Image Audio Event CustomEvent MutationObserver Intl isNaN isFinite parseInt parseFloat encodeURIComponent decodeURIComponent undefined NaN Infinity globalThis alert confirm prompt performance getComputedStyle matchMedia MediaMetadata jsmediatags msal btoa atob Notification crypto CSS HTMLElement DOMException structuredClone queueMicrotask innerWidth innerHeight".split(" "));
 
 function moduleFiles() {
-  return fs.readdirSync(path.join(ROOT, "js"), { withFileTypes: true }).flatMap((e) => (e.isFile() && e.name.endsWith(".js") ? ["js/" + e.name] : []));
+  return require("./helpers/flatten").allModuleFiles(); // every module under js/ except vendor/
 }
 
 function staticCheck() {
@@ -96,7 +96,7 @@ async function loadCheck() {
   }
   process.on("unhandledRejection", () => {}); // async init() against the fake browser may fail quietly
   try {
-    await import(pathToFileURL(path.join(ROOT, "js", "app.js")).href);
+    await import(pathToFileURL(path.join(ROOT, "js", "main.js")).href);
     check("load: the whole app imports as ES modules and its top-level code runs", true);
   } catch (e) {
     check("load: the whole app imports as ES modules and its top-level code runs", false, e.message + "\n" + String(e.stack).split("\n").slice(1, 4).join("\n"));

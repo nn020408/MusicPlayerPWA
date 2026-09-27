@@ -1,10 +1,12 @@
 // Streaming audio playback + lock-screen / notification controls via the
 // Media Session API, plus shuffle/repeat queue management.
 
-import { isNative } from "./auth.js";
-import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "./graph.js";
-import { slimTrack } from "./library.js";
-import { readId3Tags } from "./id3.js";
+
+
+import { isNative } from "../data/auth.js";
+import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
+import { slimTrack } from "../data/library.js";
+import { readId3Tags } from "../data/id3.js";
 
 export const audioEl = new Audio();
 audioEl.preload = "auto";

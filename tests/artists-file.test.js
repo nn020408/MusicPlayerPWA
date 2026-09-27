@@ -6,7 +6,7 @@ const ctx = { console: { log: console.log, warn() {}, error() {} }, setTimeout, 
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
   navigator: { onLine: true }, document: { hidden: false, addEventListener() {} }, window: { addEventListener() {} } };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/graph.js"]) { try { vm.runInContext(flat(f), ctx); } catch (e) { /* graph.js may touch browser globals */ } }
+for (const f of ["js/data/library.js", "js/data/graph.js"]) { try { vm.runInContext(flat(f), ctx); } catch (e) { /* graph.js may touch browser globals */ } }
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0; const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };
 

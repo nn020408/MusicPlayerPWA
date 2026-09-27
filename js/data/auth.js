@@ -16,7 +16,9 @@
 // getAccessToken, getActiveAccount) so js/app.js and js/graph.js need no
 // platform-specific code at all.
 
-import { APP_CONFIG } from "./config.js";
+
+
+import { APP_CONFIG } from "../core/config.js";
 
 export function isNative() {
   return !!(window.Capacitor && window.Capacitor.isNativePlatform());

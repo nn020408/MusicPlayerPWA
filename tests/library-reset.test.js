@@ -15,7 +15,7 @@ ctx.listFolder = async (id) => tree[id];
 ctx.getDownloadUrl = async (t) => "u/" + t.id;
 ctx.readArtist = async () => { reads++; return "Selena Gomez"; };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
+for (const f of ["js/data/library.js", "js/data/indexKeepAlive.js", "js/data/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0;
 const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };

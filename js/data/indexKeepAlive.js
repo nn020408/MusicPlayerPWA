@@ -4,6 +4,8 @@
 // version there is no plugin and this does nothing, so the job still pauses in a
 // background tab. The native side is IndexKeepAlivePlugin / IndexKeepAliveService.
 
+
+
 import { isNative } from "./auth.js";
 
 const indexKeepAlive = isNative() && window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin("IndexKeepAlive") : null;

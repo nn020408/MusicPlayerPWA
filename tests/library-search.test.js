@@ -29,7 +29,7 @@ ctx.listFolder = async (id) => tree[id];
 ctx.getDownloadUrl = async (t) => "http://dl/" + t.id;
 ctx.readArtist = async (url) => { const id = url.split("/").pop(); readOrder.push(id); return tags[id]; };
 
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx, { filename: f });
+for (const f of ["js/data/library.js", "js/data/indexKeepAlive.js", "js/data/indexer.js"]) vm.runInContext(flat(f), ctx, { filename: f });
 const run = (code) => vm.runInContext(code, ctx);
 
 let failures = 0;

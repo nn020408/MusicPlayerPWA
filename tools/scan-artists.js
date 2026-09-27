@@ -20,7 +20,7 @@ const path = require("path");
 const vm = require("vm");
 
 const OUT_NAME = "nubeplayer-artists.json";
-const CACHE_FILE = path.join(__dirname, ".artists-cache.json");
+const CACHE_FILE = process.env.NUBE_ARTISTS_CACHE || path.join(__dirname, ".artists-cache.json"); // tests point this elsewhere
 const AUDIO = new Set([".mp3", ".m4a", ".flac", ".ogg", ".opus", ".wav", ".aac", ".wma"]);
 
 const root = process.argv[2];
@@ -35,7 +35,10 @@ if (!root || !fs.existsSync(root)) {
 function loadAppReader() {
   const ctx = { console, TextDecoder, Uint8Array, Error, Promise, Math, Number, AbortController, setTimeout, clearTimeout };
   vm.createContext(ctx);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "js", "id3.js"), "utf8"), ctx);
+  // The reader is an ES module (it has `export`s and no imports): run it as a
+  // plain script by dropping the `export` keyword.
+  const source = fs.readFileSync(path.join(__dirname, "..", "js", "data", "id3.js"), "utf8").replace(/^export\s+/gm, "");
+  vm.runInContext(source, ctx);
   ctx.readByteRange = async (file, start, length) => {
     const fd = fs.openSync(file, "r");
     try {

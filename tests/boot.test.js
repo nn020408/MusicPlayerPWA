@@ -1,5 +1,5 @@
 const fs = require("fs"), vm = require("vm");
-const { flat } = require("./helpers/flatten");
+const { flat, moduleOrder, allModuleFiles } = require("./helpers/flatten");
 process.chdir(require("path").join(__dirname, ".."));
 
 // A stub that accepts any property access / call, so top-level wiring code runs.
@@ -44,17 +44,20 @@ const ctx = {
 ctx.window = Object.assign(window, ctx, { window });
 vm.createContext(ctx);
 
-const order = ["js/errorlog.js", "js/config.js", "js/auth.js", "js/graph.js", "js/library.js", "js/playlists.js", "js/id3.js", "js/events.js", "js/indexKeepAlive.js", "js/indexer.js", "js/player.js", "js/app.js"];
+const order = moduleOrder("js/main.js"); // dependencies first, like the browser evaluates them
 const html = fs.readFileSync("index.html", "utf8");
 const moduleTags = [...html.matchAll(/<script type="module" src="(js\/[A-Za-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]);
 const classicAppTags = [...html.matchAll(/<script src="(js\/[A-Za-z0-9-]+\.js)"><\/script>/g)].map((m) => m[1]).filter((f) => !f.includes("vendor"));
-if (JSON.stringify(moduleTags) !== JSON.stringify(["js/app.js"]) || classicAppTags.length) { console.log("FAIL index.html should load one module entry (js/app.js) and no classic app scripts:", moduleTags, classicAppTags); process.exit(1); }
-console.log("PASS index.html loads the app as one ES module entry (js/app.js)");
+if (JSON.stringify(moduleTags) !== JSON.stringify(["js/main.js"]) || classicAppTags.length) { console.log("FAIL index.html should load one module entry (js/main.js) and no classic app scripts:", moduleTags, classicAppTags); process.exit(1); }
+console.log("PASS index.html loads the app as one ES module entry (js/main.js)");
 
 const swFiles = fs.readFileSync("sw.js", "utf8");
-for (const f of order.slice(1)) if (!swFiles.includes("./" + f)) { console.log("FAIL sw.js is missing", f); process.exit(1); }
-console.log("PASS every script is in the service-worker cache list");
-
+const missingFromSw = allModuleFiles().filter((f) => !swFiles.includes(`"./${f}"`));
+if (missingFromSw.length) { console.log("FAIL sw.js cache list is missing:", missingFromSw.join(", ")); process.exit(1); }
+console.log(`PASS all ${allModuleFiles().length} modules are in the service-worker cache list`);
+const unreachable = allModuleFiles().filter((f) => !order.includes(f));
+if (unreachable.length) { console.log("FAIL modules nothing imports (dead code, or a missing import in main.js):", unreachable.join(", ")); process.exit(1); }
+console.log("PASS every module is reachable from main.js");
 process.on("unhandledRejection", () => {}); // async init() against the stub is allowed to fail quietly
 for (const f of order) {
   try { vm.runInContext(flat(f), ctx, { filename: f }); }

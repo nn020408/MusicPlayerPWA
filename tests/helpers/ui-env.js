@@ -84,7 +84,9 @@ function fakeAudio() {
   };
 }
 
-async function startApp() {
+// options.returning (default true): a returning user (folder chosen, welcome guide seen, library
+// scanned). false = a brand-new install, which starts with the welcome guide.
+async function startApp({ returning = true } = {}) {
   const { JSDOM, VirtualConsole } = require(path.join(ROOT, "tools", "node_modules", "jsdom"));
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8").replace(/<script[\s\S]*?<\/script>/g, ""); // jsdom doesn't run ES modules: the test imports app.js itself
   const dom = new JSDOM(html, { url: "https://localhost/", pretendToBeVisual: true, virtualConsole: new VirtualConsole() });
@@ -93,23 +95,25 @@ async function startApp() {
   style.textContent = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
   window.document.head.appendChild(style);
 
-  // saved state of a returning user: folder chosen, welcome guide seen, library scanned
-  window.localStorage.setItem("defaultFolderPath", JSON.stringify([{ id: "root", name: "Music" }]));
-  window.localStorage.setItem("introSeenV1", "1");
-  window.localStorage.setItem("libraryIndexCache", JSON.stringify(savedLibrary()));
+  if (returning) {
+    window.localStorage.setItem("defaultFolderPath", JSON.stringify([{ id: "root", name: "Music" }]));
+    window.localStorage.setItem("introSeenV1", "1");
+    window.localStorage.setItem("libraryIndexCache", JSON.stringify(savedLibrary()));
+  }
 
   const define = (k, v) => Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
   for (const k of ["window", "document", "localStorage", "sessionStorage", "history", "location", "MutationObserver", "Event", "CustomEvent", "MouseEvent", "KeyboardEvent", "TouchEvent", "PointerEvent", "HTMLElement", "Node", "FileReader", "getComputedStyle", "DOMParser", "matchMedia", "requestAnimationFrame", "cancelAnimationFrame", "DOMException"]) {
     if (window[k] !== undefined) define(k, typeof window[k] === "function" && !/^[A-Z]/.test(k) ? window[k].bind(window) : window[k]);
   }
-  define("navigator", { userAgent: window.navigator.userAgent, language: "en-US", languages: ["en-US"], platform: "test", maxTouchPoints: 0, onLine: true, mediaSession: undefined, clipboard: { writeText: async () => {} } });
+  define("navigator", { userAgent: window.navigator.userAgent, language: "en-US", languages: ["en-US"], platform: "test", maxTouchPoints: 0, onLine: true, clipboard: { writeText: async () => {} } });
   define("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   window.matchMedia = globalThis.matchMedia;
   const Audio = fakeAudio();
   define("Audio", Audio);
   window.Audio = Audio;
   define("MediaMetadata", function MediaMetadata() {});
-  define("jsmediatags", {});
+  // reading real tags always "fails" here, so the app falls back to the file names
+  define("jsmediatags", { read: (url, cb) => cb.onError({ type: "test" }), Reader: class { setTagsToRead() { return this; } read(cb) { cb.onError({ type: "test" }); } } });
   define("confirm", () => true);
   define("prompt", () => null);
   define("alert", () => {});
@@ -129,7 +133,7 @@ async function startApp() {
   });
   process.on("unhandledRejection", () => {});
 
-  await import(pathToFileURL(path.join(ROOT, "js", "app.js")).href);
+  await import(pathToFileURL(path.join(ROOT, "js", "main.js")).href);
   // init() is async (sign-in check, then the main view); give it a moment
   await new Promise((r) => setTimeout(r, 300));
   const doc = window.document;
@@ -144,4 +148,4 @@ async function startApp() {
   };
 }
 
-module.exports = { startApp };
+module.exports = { startApp, savedLibrary };

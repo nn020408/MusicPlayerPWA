@@ -12,7 +12,7 @@ const ctx = { isNative: () => false,
   getDownloadUrl: async () => "u", readArtist: async () => "Artist",
 };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
+for (const f of ["js/data/library.js", "js/data/indexKeepAlive.js", "js/data/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 const fresh = () => run(`libraryTracks = [makeTrack({id:'a',name:'A.mp3'},'f'), makeTrack({id:'b',name:'B.mp3'},'f')]; indexFailedIds = new Set();`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -16,7 +16,7 @@ ctx.listFolder = async (id) => (id === "root" ? { folders: [{ id: "f" }], tracks
 let graphUrlCalls = 0;
 ctx.getDownloadUrl = async (t) => { graphUrlCalls++; return "u/" + t.id + "?fresh"; };
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
+for (const f of ["js/data/library.js", "js/data/indexKeepAlive.js", "js/data/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let bad = 0;

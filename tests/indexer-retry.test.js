@@ -11,7 +11,7 @@ const raws = Array.from({ length: 30 }, (_, i) => ({ id: "s" + i, name: `S${i}.m
 ctx.listFolder = async (id) => (id === "root" ? { folders: [{ id: "f" }], tracks: [] } : { folders: [], tracks: raws });
 ctx.getDownloadUrl = async (t) => "u/" + t.id;
 vm.createContext(ctx);
-for (const f of ["js/library.js", "js/indexKeepAlive.js", "js/indexer.js"]) vm.runInContext(flat(f), ctx);
+for (const f of ["js/data/library.js", "js/data/indexKeepAlive.js", "js/data/indexer.js"]) vm.runInContext(flat(f), ctx);
 const run = (c) => vm.runInContext(c, ctx);
 let bad = 0; const check = (n, c, x = "") => { if (!c) bad++; console.log((c ? "PASS " : "FAIL ") + n + " " + x); };
 (async () => {
