@@ -16,13 +16,8 @@
 // getAccessToken, getActiveAccount) so the UI and js/data/graph.js need no
 // platform-specific code at all.
 
-
-
 import { APP_CONFIG } from "../core/config.js";
-
-export function isNative() {
-  return !!(window.Capacitor && window.Capacitor.isNativePlatform());
-}
+import { isNative } from "../core/platform.js";
 
 // ---------- Web: MSAL.js redirect flow ----------
 

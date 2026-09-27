@@ -6,7 +6,7 @@
 
 
 
-import { isNative } from "./auth.js";
+import { isNative } from "../core/platform.js";
 
 const indexKeepAlive = isNative() && window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin("IndexKeepAlive") : null;
 let indexKeepAliveActive = false; // the service is confirmed running

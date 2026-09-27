@@ -1,11 +1,11 @@
 // Backup and restore of playlists and the library index.
 
 import { el } from "../core/dom.js";
-import { isNative } from "../data/auth.js";
+import { isNative } from "../core/platform.js";
 import { LIBRARY_CACHE_KEY, libraryTracks, loadCachedLibrary } from "../data/library.js";
 import { loadPlaylists, savePlaylists } from "../data/playlists.js";
-import { showToast } from "./toast.js";
 import { kickOffIndexing, markLibraryLoaded, markLibraryStale, stopLibraryWorkAndWait } from "./libraryWork.js";
+import { showToast } from "./toast.js";
 
 // Purely on-demand — only runs when you tap the button, never automatically,
 // so it can't affect app speed. Safe to include the search index: it only

@@ -2,13 +2,13 @@
 // time.
 
 import { el } from "../core/dom.js";
-import { isNative } from "../data/auth.js";
-import { exitSelectMode, selectMode } from "./select.js";
-import { goUpOneFolder } from "./folderView.js";
+import { isNative } from "../core/platform.js";
 import { handleFolderPickerBack } from "./folderPicker.js";
+import { goUpOneFolder } from "./folderView.js";
 import { handleIntroBack } from "./intro.js";
-import { handleSearchBack } from "./search.js";
 import { closeFullPlayer } from "./playerUI.js";
+import { handleSearchBack } from "./search.js";
+import { exitSelectMode, selectMode } from "./select.js";
 
 // A PWA has no built-in back-stack, so without this the hardware/gesture
 // back button just exits the app immediately no matter what's open. This

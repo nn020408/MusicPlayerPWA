@@ -11,6 +11,8 @@ const SHELL_FILES = [
   "./js/core/dom.js",
   "./js/core/errorlog.js",
   "./js/core/events.js",
+  "./js/core/platform.js",
+  "./js/core/playbackIntent.js",
   "./js/core/text.js",
   "./js/data/artwork.js",
   "./js/data/auth.js",

@@ -16,11 +16,11 @@
 
 
 
+import { wantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, listFolder, retryWithBackoff } from "./graph.js";
-import { abortScan, buildSearchText, cacheLibrary, getLibraryRootId, invalidateArtistsCache, isScanning, libraryTracks, runWithConcurrency } from "./library.js";
 import { readArtist } from "./id3.js";
 import { isIndexKeepAliveActive } from "./indexKeepAlive.js";
-import { wantsToPlay } from "../player/player.js";
+import { abortScan, buildSearchText, cacheLibrary, getLibraryRootId, invalidateArtistsCache, isScanning, libraryTracks, runWithConcurrency } from "./library.js";
 
 const INDEX_CONCURRENCY = 6; // in flight at once; the pacing gap below is what actually limits the rate
 const INDEX_SAVE_EVERY = 100; // songs between saves of the library cache
