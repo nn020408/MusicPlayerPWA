@@ -2,7 +2,7 @@
 // confirmed instead of guessed at. Kept in sync with sw.js's CACHE_NAME by
 // hand (bump both together) — a plain constant instead of asking the service
 // worker, since the Android app has no service worker at all.
-export const APP_VERSION = "v129";
+export const APP_VERSION = "v130";
 
 // Azure app registration settings — from portal.azure.com > App registrations > MusicPlayer
 export const APP_CONFIG = {

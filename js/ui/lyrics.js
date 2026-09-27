@@ -1,5 +1,6 @@
-// Lyrics: finding them online (LRCLIB, lyrics.ovh) and the synced lyrics panel
-// in the full player.
+// The lyrics panel in the full player: shows the lyrics for the current song
+// (synced lines follow the playback position). Finding them online is
+// data/lyrics.js.
 
 import { el } from "../core/dom.js";
 import { getLyricsForTrack } from "../data/lyrics.js";
