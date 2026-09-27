@@ -3,11 +3,12 @@
 
 import { el } from "../core/dom.js";
 import { formatTime } from "../core/text.js";
+import { findOnlineArtwork } from "../data/artwork.js";
 import { getThumbnailUrl } from "../data/graph.js";
 import { audioEl, currentTrack, cycleRepeat, player, playNext, playPause, playPrevious, seekTo, toggleShuffle } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { paintFallbackArt } from "./fallbackArt.js";
-import { cleanTrackTitle, closeLyricsView, fieldMatchScore, lyricsViewActive, primaryArtist, provideRealTags, showLyricsForCurrentTrack, startTrackTags, updateActiveLyricsLine } from "./lyrics.js";
+import { closeLyricsView, lyricsViewActive, provideRealTags, showLyricsForCurrentTrack, startTrackTags, updateActiveLyricsLine } from "./lyrics.js";
 import { hideToast, showToast } from "./toast.js";
 import { updateNowPlayingRows } from "./trackRow.js";
 import { openUpNextView } from "./upNext.js";
@@ -22,52 +23,6 @@ function applyRealArt(url) {
   el.fullArt.src = url;
   el.fullArt.classList.remove("hidden");
   el.fullArtFallback.classList.add("hidden");
-}
-
-// Same scoring discipline as scoreLyricsCandidate/LYRICS_MATCH_THRESHOLD
-// below — this used to just trust iTunes' top result blindly (limit=1, no
-// verification), which for less mainstream genres (regional/vallenato etc.,
-// where iTunes' catalog is thin) reliably returned some other band's cover
-// entirely instead of admitting "no match" and falling back to the
-// placeholder. Confirmed by a user report showing 4-5 confidently wrong
-// covers in a row.
-function scoreArtworkCandidate(candidate, wantTitle, wantArtist) {
-  let score = 0;
-  score += fieldMatchScore(wantTitle, candidate.trackName, 3, 1.5);
-  score += fieldMatchScore(wantArtist, candidate.artistName, 3, 1.5);
-  return score;
-}
-
-const ARTWORK_MATCH_THRESHOLD = 4; // same bar as lyrics — an exact title alone isn't enough without the artist agreeing too
-
-// Last resort: look up the song by artist/title in Apple's public music
-// catalog. This is the only art source that leaves the app/OneDrive — it's a
-// best-effort text match, so several candidates are scored against what was
-// actually asked for rather than trusting whichever one comes back first.
-async function findOnlineArtwork(title, artist) {
-  const cleanTitle = cleanTrackTitle(title);
-  const cleanArtist = artist ? primaryArtist(artist) : "";
-  const term = `${cleanArtist} ${cleanTitle}`.trim();
-  if (!term) return null;
-  try {
-    const res = await fetch(`https://itunes.apple.com/search?media=music&limit=5&term=${encodeURIComponent(term)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const results = data.results || [];
-    let best = null;
-    let bestScore = -Infinity;
-    for (const candidate of results) {
-      const score = scoreArtworkCandidate(candidate, cleanTitle, cleanArtist);
-      if (score > bestScore) {
-        best = candidate;
-        bestScore = score;
-      }
-    }
-    if (!best || bestScore < ARTWORK_MATCH_THRESHOLD || !best.artworkUrl100) return null;
-    return best.artworkUrl100.replace("100x100", "600x600"); // ask for a bigger version than the default thumbnail
-  } catch (err) {
-    return null;
-  }
 }
 
 // Skips a same-folder cover image on purpose — that was tried and dropped
