@@ -91,12 +91,16 @@ export function setWantsToPlay(value) {
 // app can no longer run the "play" handler that a remote Play button (the
 // car stereo, the lock screen) sends — pressing it then did nothing until the
 // app was reopened by hand. This keeps the exemption alive for a grace period
-// after pausing instead, long enough to resume from a stoplight, and only
-// lets it lapse (ending the grace period, and with it the Android foreground
-// service) if nothing resumes playback before the timer runs out. The timer
-// itself survives the background freeze because the still-playing keep-alive
-// tone is exactly what prevents that freeze while it's pending.
-const PAUSE_GRACE_MS = 10 * 60 * 1000; // 10 minutes
+// after pausing instead — long enough to cover a normal pause (a meal, running
+// an errand), closer to how a native player like YouTube or Spotify stays
+// resumable until you actually leave the app — and only lets it lapse (ending
+// the grace period, and with it the Android foreground service) if nothing
+// resumes playback before the timer runs out. If you swipe the app away or
+// force-stop it, Android kills the whole process regardless of this timer, so
+// that always ends it immediately too. The timer itself survives the
+// background freeze because the still-playing keep-alive tone is exactly what
+// prevents that freeze while it's pending.
+const PAUSE_GRACE_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // delayMs is a seam for tests (real production calls always use the default).
 export function pauseWithGrace(delayMs = PAUSE_GRACE_MS) {
