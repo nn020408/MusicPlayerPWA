@@ -65,15 +65,44 @@ if (isNative()) {
   keepAliveEl.loop = true;
 }
 
+let pauseGraceTimer = null;
+
 // Drives keepAliveEl. Called with true wherever playback is started/resumed,
-// and false only where playback intent genuinely ends (user pause, sign-out,
-// queue exhausted) — deliberately NOT tied to audioEl's own pause/play events,
-// since those also fire for the transient mid-retry pause this exists to
-// survive.
+// and false only where playback intent genuinely ends (sign-out, queue
+// exhausted, retries given up) — deliberately NOT tied to audioEl's own
+// pause/play events, since those also fire for the transient mid-retry pause
+// this exists to survive. A user pause goes through pauseWithGrace() below
+// instead of calling this directly.
 export function setWantsToPlay(value) {
+  if (pauseGraceTimer) {
+    clearTimeout(pauseGraceTimer);
+    pauseGraceTimer = null;
+  }
   if (wantsToPlay === value) return;
   wantsToPlay = value;
   if (!keepAliveEl) return;
   if (value) keepAliveEl.play().catch(() => {});
   else keepAliveEl.pause();
+}
+
+// A plain user pause (in-app button, or the lock-screen/Bluetooth/car-stereo
+// pause button) used to call setWantsToPlay(false) immediately, which stops
+// the keep-alive tone and lets the WebView freeze within seconds. Frozen, the
+// app can no longer run the "play" handler that a remote Play button (the
+// car stereo, the lock screen) sends — pressing it then did nothing until the
+// app was reopened by hand. This keeps the exemption alive for a grace period
+// after pausing instead, long enough to resume from a stoplight, and only
+// lets it lapse (ending the grace period, and with it the Android foreground
+// service) if nothing resumes playback before the timer runs out. The timer
+// itself survives the background freeze because the still-playing keep-alive
+// tone is exactly what prevents that freeze while it's pending.
+const PAUSE_GRACE_MS = 10 * 60 * 1000; // 10 minutes
+
+// delayMs is a seam for tests (real production calls always use the default).
+export function pauseWithGrace(delayMs = PAUSE_GRACE_MS) {
+  if (pauseGraceTimer) clearTimeout(pauseGraceTimer);
+  pauseGraceTimer = setTimeout(() => {
+    pauseGraceTimer = null;
+    setWantsToPlay(false);
+  }, delayMs);
 }

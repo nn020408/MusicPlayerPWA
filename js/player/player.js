@@ -1,7 +1,7 @@
 // Streaming audio playback + lock-screen / notification controls via the
 // Media Session API, plus shuffle/repeat queue management.
 
-import { setWantsToPlay } from "../core/playbackIntent.js";
+import { pauseWithGrace, setWantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
 import { slimTrack } from "../data/library.js";
@@ -478,11 +478,12 @@ function resumePlayback() {
 }
 
 // Routes every explicit "stop the music" path (in-app button, lock-screen /
-// notification pause) through here so wantsToPlay always reflects real user
-// intent — see the keep-alive comment above audioEl's definition for why that
-// distinction (vs. just watching audioEl's own pause event) matters.
+// notification pause) through here. Doesn't drop wantsToPlay immediately —
+// see pauseWithGrace() in core/playbackIntent.js for why a plain pause still
+// needs to survive for a while, so a remote Play (car stereo, lock screen)
+// keeps working after the app goes to the background.
 function userPause() {
-  setWantsToPlay(false);
+  pauseWithGrace();
   audioEl.pause();
   if (audioEl.error) {
     // Currently mid-network-recovery — an explicit pause should actually
