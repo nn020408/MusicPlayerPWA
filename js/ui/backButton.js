@@ -47,6 +47,14 @@ function handleBackPress() {
   }
   if (!el.introOverlay.classList.contains("hidden")) return handleIntroBack();
   if (!el.folderPickerOverlay.classList.contains("hidden")) return handleFolderPickerBack();
+  if (!el.errorLogOverlay.classList.contains("hidden")) {
+    // Opened from within Settings (and sits on top of it, still open
+    // underneath) — close this first so back steps out one layer at a time,
+    // same as everything else, instead of falling through to the Settings
+    // check below and closing Settings while the error log stays open.
+    el.errorLogOverlay.classList.add("hidden");
+    return true;
+  }
   if (!el.settingsOverlay.classList.contains("hidden")) {
     el.settingsOverlay.classList.add("hidden");
     return true;

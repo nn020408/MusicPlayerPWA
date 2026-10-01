@@ -25,6 +25,19 @@ module.exports = async function backScenarios(phone, check) {
     check(`back: ${name} closes`, wasOpen && (await hidden(overlay)));
   }
 
+  // Error log (Settings > View error log): BACK closes the error log first,
+  // leaving Settings open underneath, then a second BACK closes Settings too.
+  await reset();
+  await click("#settings-btn");
+  await sleep(300);
+  await click("#error-log-btn");
+  await sleep(300);
+  await back();
+  const settingsStillOpen = !(await hidden("#settings-overlay"));
+  const errorLogClosed = await hidden("#error-log-overlay");
+  await back();
+  check("back: error log closes first, leaving Settings open, then Settings closes", settingsStillOpen && errorLogClosed && (await hidden("#settings-overlay")));
+
   // Selection mode
   await reset();
   await click("#select-toggle-btn");
