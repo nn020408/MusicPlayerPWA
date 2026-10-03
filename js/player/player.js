@@ -1,7 +1,7 @@
 // Streaming audio playback + lock-screen / notification controls via the
 // Media Session API, plus shuffle/repeat queue management.
 
-import { pauseWithGrace, setWantsToPlay } from "../core/playbackIntent.js";
+import { pauseWithGrace, setWantsToPlay, wantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
 import { slimTrack } from "../data/library.js";
@@ -716,6 +716,61 @@ function updatePositionState() {
   const native = nativeMediaSession();
   if (native) native.setPositionState(state);
 }
+
+// Android's priority for a media session quietly lapses after it's sat
+// unchanged for a while — after that, the OS stops forwarding remote Play
+// commands (a Bluetooth car stereo, the lock screen) to this app at all.
+// Confirmed on a real car stereo: during an extended pause, the truck's own
+// Play button stops doing anything, while the app itself is completely fine
+// the whole time — tapping Play in the app always works, and doing that also
+// immediately makes the truck's button start working again. That's the OS
+// quietly dropping this app as "the" session to route remote commands to,
+// not anything freezing. Re-announcing the current state every minute, for as
+// long as playback is intended to be on (actually playing, or within the
+// post-pause grace window — see wantsToPlay in core/playbackIntent.js), keeps
+// the session fresh enough that the OS keeps routing commands here.
+//
+// While genuinely playing, updatePositionState() already does this on every
+// timeupdate tick — the position itself keeps moving, which is what actually
+// matters here (see the next paragraph). The interesting case is PAUSED: the
+// native Android plugin (@jofr/capacitor-media-session) only re-posts the
+// session to Android when something it tracks actually changes —
+// MediaSessionService.setPosition()/setPlaybackState() both diff against the
+// previous value and silently no-op a repeat of the same one (confirmed by
+// reading that plugin's source, and on a real device: `dumpsys media_session`
+// showed the session's own last-updated timestamp never moving while this
+// re-sent an unchanged "still paused" state every minute). So a paused tick
+// nudges the reported position by an imperceptible alternating millisecond —
+// nothing anyone could ever notice on a frozen progress bar — specifically so
+// the plugin sees a real change and actually re-posts to Android, instead of
+// dropping the no-op update like it would a literal repeat.
+const SESSION_HEARTBEAT_MS = 60 * 1000;
+let sessionHeartbeatPauseJitterMs = 0;
+function sessionHeartbeat() {
+  if (wantsToPlay) {
+    const state = audioEl.paused ? "paused" : "playing";
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = state;
+    nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: state });
+    if (audioEl.paused && audioEl.duration && isFinite(audioEl.duration)) {
+      sessionHeartbeatPauseJitterMs = sessionHeartbeatPauseJitterMs ? 0 : 1;
+      const position = Math.min(audioEl.currentTime + sessionHeartbeatPauseJitterMs / 1000, audioEl.duration);
+      const jitteredState = { duration: audioEl.duration, playbackRate: 0, position };
+      if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
+        try {
+          navigator.mediaSession.setPositionState(jitteredState);
+        } catch {
+          // Throws if position is transiently out of range (e.g. mid-src-swap) — harmless.
+        }
+      }
+      const native = nativeMediaSession();
+      if (native) native.setPositionState(jitteredState);
+    } else {
+      updatePositionState();
+    }
+  }
+  setTimeout(sessionHeartbeat, SESSION_HEARTBEAT_MS);
+}
+sessionHeartbeat();
 
 audioEl.addEventListener("play", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";

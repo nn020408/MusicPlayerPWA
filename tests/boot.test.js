@@ -77,3 +77,8 @@ console.log("PASS banner while partially indexed:", JSON.stringify(bannerHtml.sl
 console.log("PASS artist row html:", JSON.stringify(run(`artistRowHtml(getArtists()[0])`).replace(/\s+/g, " ").slice(0, 90)));
 run("renderSearchHome(); renderArtistsView();");
 console.log("PASS search home and Artists view render without error");
+// Explicit exit: app code loaded into this sandbox can schedule real Node
+// timers (e.g. player.js's session-priority heartbeat) that would otherwise
+// keep this process alive waiting for them instead of exiting once the
+// checks above are done.
+process.exit(0);
