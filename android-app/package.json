@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "sync-web": "node sync-web.mjs",
-    "sync": "npm run sync-web && npx cap sync android"
+    "postinstall": "node patch-media-session.mjs",
+    "sync": "node patch-media-session.mjs && npm run sync-web && npx cap sync android"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
