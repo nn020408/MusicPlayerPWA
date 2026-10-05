@@ -2,7 +2,7 @@
 // We deliberately do NOT cache audio or Graph API responses since this app
 // is streaming-only by design (no offline playback).
 
-const CACHE_NAME = "musicplayer-shell-v137";
+const CACHE_NAME = "musicplayer-shell-v138";
 const SHELL_FILES = [
   "./",
   "./index.html",

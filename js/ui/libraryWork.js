@@ -148,19 +148,27 @@ export async function rescanLibrary(scope = null) {
   clearFolderListCache(); // otherwise "rescan" would just re-read cached folder data
   showToast("Scanning your music for search…");
   updateRescanButtonUI();
+  // The counts of the part being scanned (the whole library, or just the scope) —
+  // the last progress report of the scan holds its final totals.
   let finalFolderCount = 0;
+  let finalSongCount = 0;
   const onProgress = (folders, tracks, warning) => {
     finalFolderCount = folders;
+    finalSongCount = tracks;
     const msg = `Scanning for search… ${folders} folder${folders === 1 ? "" : "s"}, ${tracks} song${tracks === 1 ? "" : "s"} found`;
     setScanProgressUI(`<span class="spinner"></span>${escapeHtml(warning ? `${msg} (${warning})` : msg)}`);
   };
   try {
     await scanLibrary(onProgress, scope);
     libraryLoaded = true;
-    const doneMsg = `Done — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found.`;
-    el.scanStatus.textContent = doneMsg;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    const libraryNote = `library: ${plural(libraryTracks.length, "song")}`;
+    const summary = scope
+      ? `Refreshed ${scope.path.split("/").pop()} — ${plural(finalFolderCount, "folder")}, ${plural(finalSongCount, "song")} (${libraryNote})`
+      : `Search ready — ${plural(finalFolderCount, "folder")}, ${plural(libraryTracks.length, "song")} found`;
+    el.scanStatus.textContent = summary;
     libraryEvents.emit("scanned");
-    showToast(`Search ready — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found`);
+    showToast(summary);
     kickOffIndexing();
   } catch (err) {
     console.error(err);

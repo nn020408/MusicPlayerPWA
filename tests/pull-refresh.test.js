@@ -85,6 +85,8 @@ const check = (name, ok, detail = "") => {
   check("a pull inside Rock removes the song deleted in that folder", !afterTitles.includes("Wonderwall.mp3"));
   check("a pull inside Rock adds the song added in that folder", afterTitles.includes("Fresh Rock.mp3"));
   check("a pull inside Rock leaves the rest of the library alone", !afterTitles.includes("Outside Pop.mp3"), `${beforeTitles.length} -> ${afterTitles.length} songs`);
+  const summary = $("#toast").textContent;
+  check("the message describes the refreshed folder, not the whole library", /^Refreshed Rock — 2 folders, 4 songs \(library: \d+ songs\)$/.test(summary), summary);
   check("the library still has the other folders' songs", afterTitles.includes("Ballade Pour Adeline.mp3") && afterTitles.includes("Hips Don't Lie.mp3"));
 
   // back at the top of the library: a pull re-reads everything, including the pop song
