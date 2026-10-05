@@ -3,7 +3,7 @@
 // and length so a low-confidence guess is never shown as a match. No screen code
 // here; the panel lives in ui/lyrics.js.
 
-import { cleanTrackTitle, fieldMatchScore, primaryArtist } from "./textMatch.js";
+import { cleanTrackTitle, creditedNames, fieldMatchScore } from "./textMatch.js";
 
 // LRCLIB (lrclib.net) is a free, keyless, crowd-sourced lyrics API — same
 // "one small request for the currently-playing track only" pattern as
@@ -130,40 +130,60 @@ async function fetchLyricsResult(track, sources) {
   const cleanTitle = cleanTrackTitle(rawTitle);
   const titleCandidates = [...new Set([cleanTitle, rawTitle])];
 
-  const rawArtist = (realTags && realTags.artist) || (track.audio && track.audio.artist) || "";
-  const artist = rawArtist ? primaryArtist(rawArtist) : "";
+  // The playing copy of a track can be from before its artist tag was read, so
+  // the library's own copy (looked up by id) is the last source before the folder.
+  const rawArtist = (realTags && realTags.artist) || (track.audio && track.audio.artist) || (sources.libraryArtist && sources.libraryArtist()) || "";
+  // Files with no artist tag often sit in an artist's own folder ("Diomedes Diaz/
+  // 02 - No Comprendo.mp3"), so the folder name stands in as the artist — the
+  // only one tried when there's no tag, so it never overrides a real tag.
+  const folderName = ((sources.folderPath && sources.folderPath()) || "").split("/").pop();
+  // A collab tag like "Diomedes Diaz/Ivan Zuleta" is tried as each artist in turn
+  // (LRCLIB files most songs under one of them), then as the whole credit.
+  const artistSources = rawArtist ? [...creditedNames(rawArtist), rawArtist] : [folderName];
+  const artistCandidates = [...new Set(artistSources.filter(Boolean))].slice(0, 3);
+  const artist = artistCandidates[0] || "";
   const album = (realTags && realTags.album) || (track.audio && track.audio.album) || "";
   const duration = sources.getDuration();
 
   let hit = null;
 
   // 1) Exact match on the cleaned title — most precise when it works.
-  if (!hit && artist) {
-    const params = new URLSearchParams({ track_name: cleanTitle, artist_name: artist });
+  for (const candidate of artistCandidates) {
+    if (hit) break;
+    const params = new URLSearchParams({ track_name: cleanTitle, artist_name: candidate });
     if (album) params.set("album_name", album);
     if (duration) params.set("duration", String(duration));
     hit = await lrclibGet(params);
   }
   // 2) Same, but without duration — covers a different reference recording
   //    (radio edit vs. album version) being a few seconds off.
-  if (!hit && artist && duration) {
-    const params = new URLSearchParams({ track_name: cleanTitle, artist_name: artist });
+  for (const candidate of artistCandidates) {
+    if (hit || !duration) break;
+    const params = new URLSearchParams({ track_name: cleanTitle, artist_name: candidate });
     if (album) params.set("album_name", album);
     hit = await lrclibGet(params);
   }
-  // 3) Fuzzy search, scored — try each title candidate until one clears the
-  //    confidence bar, instead of trusting whichever result LRCLIB ranks
-  //    first.
+  // 3) Fuzzy search, scored — try each title and artist candidate until one
+  //    clears the confidence bar, instead of trusting whichever result LRCLIB
+  //    ranks first.
   for (const title of titleCandidates) {
-    if (hit) break;
-    const params = new URLSearchParams({ track_name: title, artist_name: artist });
-    const results = await lrclibSearch(params);
+    for (const candidate of artistCandidates) {
+      if (hit) break;
+      const params = new URLSearchParams({ track_name: title, artist_name: candidate });
+      const results = await lrclibSearch(params);
+      hit = bestScoredMatch(results, cleanTitle, candidate, duration);
+    }
+  }
+  // 3b) Free-text search over title and artist together: word order, accents
+  //     and extra words in either field stop mattering.
+  if (!hit) {
+    const results = await lrclibSearch(new URLSearchParams({ q: [cleanTitle, artist].filter(Boolean).join(" ") }));
     hit = bestScoredMatch(results, cleanTitle, artist, duration);
   }
   // 4) Last resort: title only, no artist constraint (covers a missing/wrong
-  //    artist tag) — still scored, so a low-confidence guess doesn't slip
-  //    through as if it were a real match.
-  if (!hit && artist) {
+  //    artist tag, which is common for files with no embedded tags) — still
+  //    scored, so a low-confidence guess doesn't slip through as a real match.
+  if (!hit) {
     const params = new URLSearchParams({ track_name: cleanTitle });
     const results = await lrclibSearch(params);
     hit = bestScoredMatch(results, cleanTitle, "", duration);
@@ -187,5 +207,10 @@ export function getLyricsForTrack(track, sources) {
   if (lyricsCache.has(track.id)) return lyricsCache.get(track.id);
   const promise = fetchLyricsResult(track, sources);
   lyricsCache.set(track.id, promise);
+  // A miss is not cached: it may have come from a lookup made before the
+  // artist tag finished loading, so reopening the panel should try again.
+  promise.then((r) => {
+    if (!r.plain && !r.synced) lyricsCache.delete(track.id);
+  });
   return promise;
 }

@@ -22,12 +22,22 @@ export function cleanTrackTitle(name) {
 // "Artist A feat. Artist B" / "Artist A, Artist B" / "Artist A & Artist B"
 // -> "Artist A" — LRCLIB's artist_name is the primary credited artist, and
 // querying with the full collab string as a single name rarely matches.
-export function primaryArtist(artist) {
-  return artist.split(/\s*(?:,|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bx\b|\bvs\.?\b)\s*/i)[0].trim();
+// Splits a credit like "A / B; C & D feat. E" into its artists, in order.
+export function creditedNames(artist) {
+  return artist
+    .split(/\s*(?:\/|;|,|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bx\b|\bvs\.?\b)\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
+export function primaryArtist(artist) {
+  return creditedNames(artist)[0] || "";
+}
+
+// Accents are removed first, so "Díaz" and "Diaz" compare equal instead of
+// turning into "d az" and "diaz".
 function normalizeForCompare(s) {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 // Plain Levenshtein edit distance — used so a real-world spelling variant

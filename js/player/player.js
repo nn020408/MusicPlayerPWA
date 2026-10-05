@@ -4,7 +4,7 @@
 import { pauseWithGrace, setWantsToPlay, wantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
-import { slimTrack } from "../data/library.js";
+import { forgetTrack, slimTrack } from "../data/library.js";
 
 export const audioEl = new Audio();
 audioEl.preload = "auto";
@@ -376,6 +376,8 @@ export async function playCurrent() {
       {
         maxAttempts: 8,
         maxDelayMs: 30000,
+        // A 404 means OneDrive no longer has this file: retrying can't bring it back.
+        shouldRetry: (err) => !(err && err.status === 404),
         onRetry: (attempt) => {
           if (isStillCurrent()) player.onStatus && player.onStatus(`Connection trouble — retrying "${item.name}" (${attempt})…`);
         },
@@ -421,6 +423,14 @@ export async function playCurrent() {
       player.onRealTags && player.onRealTags({ ...tags, pictureUrl });
     });
   } catch (err) {
+    if (err && err.status === 404) {
+      // The file was deleted in OneDrive: drop it from the library and move on,
+      // instead of leaving an error on screen for a song that can't be played.
+      forgetTrack(item.id);
+      player.onStatus && player.onStatus(`Removed "${item.name.replace(/.[^/.]+$/, "")}" — it's no longer in OneDrive`);
+      if (isStillCurrent()) playNext();
+      return;
+    }
     console.error("Playback failed", err);
     const isAutoplayBlock = err && err.name === "NotAllowedError";
     const detail = isAutoplayBlock ? "browser blocked autoplay — tap play again" : (err && err.message) || String(err);

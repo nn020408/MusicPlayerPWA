@@ -38,11 +38,20 @@ const check = (name, ok, detail = "") => {
   await sleep(100);
   check("a tiny movement does not refresh", scannedAt() === before);
 
-  // a real pull from the top: the library is re-read
+  // a pull that is only moderate (about the old, shorter distance): nothing happens
+  const beforeModerate = scannedAt();
   await sleep(5);
   touch("touchstart", 100);
   touch("touchmove", 260);
   touch("touchend", 260);
+  await sleep(100);
+  check("a moderate pull does not refresh (the gesture is deliberately long)", scannedAt() === beforeModerate);
+
+  // a real pull from the top: the library is re-read
+  await sleep(5);
+  touch("touchstart", 100);
+  touch("touchmove", 380);
+  touch("touchend", 380);
   await sleep(400);
   check("a real pull from the top re-reads the library", scannedAt() > before, `scannedAt ${before} -> ${scannedAt()}`);
   check("the strip is closed again afterwards", $("#pull-refresh").style.height === "0px");
@@ -52,8 +61,8 @@ const check = (name, ok, detail = "") => {
   const before2 = scannedAt();
   await sleep(5);
   touch("touchstart", 100);
-  touch("touchmove", 260);
-  touch("touchend", 260);
+  touch("touchmove", 380);
+  touch("touchend", 380);
   await sleep(100);
   check("a pull that starts mid-list does not refresh", scannedAt() === before2);
   list.scrollTop = 0;
@@ -78,8 +87,8 @@ const check = (name, ok, detail = "") => {
   TREE.pop.songs.push(["Outside Pop.mp3", "Someone"]);
   const scopedBefore = scannedAt();
   touch("touchstart", 100);
-  touch("touchmove", 260);
-  touch("touchend", 260);
+  touch("touchmove", 380);
+  touch("touchend", 380);
   await waitForScan(scopedBefore);
   const afterTitles = titles();
   check("a pull inside Rock removes the song deleted in that folder", !afterTitles.includes("Wonderwall.mp3"));
@@ -95,8 +104,8 @@ const check = (name, ok, detail = "") => {
   await sleep(300);
   const topBefore = scannedAt();
   touch("touchstart", 100);
-  touch("touchmove", 260);
-  touch("touchend", 260);
+  touch("touchmove", 380);
+  touch("touchend", 380);
   await waitForScan(topBefore);
   check("a pull at the top of the library refreshes everything", titles().includes("Outside Pop.mp3"));
 

@@ -16,12 +16,12 @@ const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 // trigger — a phone reporting a connected-but-flaky signal never fires
 // "offline" in the first place, so plain timed backoff is what actually
 // recovers here.
-export async function retryWithBackoff(attempt, { maxAttempts = 6, baseDelayMs = 2000, maxDelayMs = 20000, onRetry } = {}) {
+export async function retryWithBackoff(attempt, { maxAttempts = 6, baseDelayMs = 2000, maxDelayMs = 20000, onRetry, shouldRetry = () => true } = {}) {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       return await attempt();
     } catch (err) {
-      if (i === maxAttempts - 1) throw err;
+      if (i === maxAttempts - 1 || !shouldRetry(err)) throw err;
       const delay = Math.min(baseDelayMs * 2 ** i, maxDelayMs);
       onRetry && onRetry(i + 1, delay, err);
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -41,7 +41,11 @@ async function graphGet(pathOrUrl, { priority } = {}) {
   // mid-scan) instead of making it queue behind up to 5 scan requests.
   if (priority) fetchOptions.priority = priority;
   const res = await fetch(url, fetchOptions);
-  if (!res.ok) throw new Error(`Graph request failed: ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`Graph request failed: ${res.status}`);
+    err.status = res.status; // lets callers tell "gone" (404) apart from a flaky connection
+    throw err;
+  }
   return res.json();
 }
 

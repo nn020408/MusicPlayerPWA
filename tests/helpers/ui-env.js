@@ -25,6 +25,8 @@ const TREE = {
   salsa: { name: "Salsa", folders: [], songs: [["Pedro Navaja.mp3", "Ruben Blades"], ["La Vida Es Un Carnaval.mp3", "Celia Cruz"]] },
 };
 const id = (folder, name) => `${folder}/${name}`;
+// song ids the fake OneDrive has deleted: asking for their download link gives 404
+const GONE = new Set();
 
 function graphResponse(url) {
   const m = /\/me\/drive\/(?:root|items\/([^/?]+))(?:\/children)?/.exec(url);
@@ -128,6 +130,8 @@ async function startApp({ returning = true } = {}) {
   define("fetch", async (url) => {
     requests.push(String(url));
     const u = String(url);
+    const itemPath = u.split("/me/drive/items/")[1];
+    if (itemPath && GONE.has(decodeURIComponent(itemPath.split("?")[0]))) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
     if (u.startsWith("https://files.test/")) return { ok: true, status: 206, headers: { get: () => null }, body: null, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     return { ok: true, status: 200, json: async () => graphResponse(u), text: async () => "" };
   });
@@ -148,4 +152,4 @@ async function startApp({ returning = true } = {}) {
   };
 }
 
-module.exports = { startApp, savedLibrary, TREE };
+module.exports = { startApp, savedLibrary, TREE, GONE };

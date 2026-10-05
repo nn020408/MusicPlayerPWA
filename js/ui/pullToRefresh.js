@@ -21,9 +21,9 @@ function scopeOnScreen() {
 }
 
 const PULL_START_PX = 8; // ignore tiny movements (a tap, a normal scroll)
-const PULL_STRETCH = 0.6; // the strip grows slower than the finger, like a real pull
-const PULL_MAX_PX = 96; // the strip stops growing past this
-const PULL_TRIGGER_PX = 56; // how far the strip must be pulled before letting go refreshes
+const PULL_STRETCH = 0.45; // the strip grows slower than the finger, so a real pull is a deliberate one
+const PULL_MAX_PX = 120; // the strip stops growing past this
+const PULL_TRIGGER_PX = 110; // how far the strip must be pulled before letting go refreshes (about a quarter of the screen)
 const PULL_REFRESHING_PX = 48; // how tall the strip stays while spinning
 
 let startY = null;
@@ -54,8 +54,16 @@ function endPull() {
   const startedHere = startY !== null;
   startY = null;
   if (!startedHere || refreshing) return;
-  if (pullPx >= PULL_TRIGGER_PX) refresh();
-  else setHeight(0, true);
+  if (pullPx < PULL_TRIGGER_PX) {
+    setHeight(0, true);
+    return;
+  }
+  // The whole library takes minutes, so that one asks first; a folder is quick.
+  if (!scopeOnScreen() && !confirm("Re-read the whole library from OneDrive? This takes a couple of minutes.")) {
+    setHeight(0, true);
+    return;
+  }
+  refresh();
 }
 
 el.fileList.addEventListener(

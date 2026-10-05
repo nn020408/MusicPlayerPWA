@@ -3,6 +3,7 @@
 // data/lyrics.js.
 
 import { el } from "../core/dom.js";
+import { folderPathOf, libraryArtistFor } from "../data/library.js";
 import { getLyricsForTrack } from "../data/lyrics.js";
 import { audioEl, currentTrack } from "../player/player.js";
 
@@ -103,6 +104,8 @@ export async function showLyricsForCurrentTrack() {
     const lyrics = await getLyricsForTrack(track, {
       getRealTags: () => (currentTrack() === track ? waitForRealTags(3000) : Promise.resolve(null)),
       getDuration: () => Math.round(audioEl.duration) || 0,
+      folderPath: () => folderPathOf(track.folderId),
+      libraryArtist: () => libraryArtistFor(track.id),
     });
     if (currentTrack() !== track || !lyricsViewActive) return; // track/view changed while fetching
     currentLyrics = lyrics;

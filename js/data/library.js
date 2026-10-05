@@ -401,6 +401,17 @@ function creditedArtists(raw) {
 
 let artistsCache = null;
 let artistByIdCache = null;
+// Drops a song that no longer exists in OneDrive from the library (and the saved
+// copy of it), so it stops being listed in search and played again.
+export function forgetTrack(trackId) {
+  const before = libraryTracks.length;
+  libraryTracks = libraryTracks.filter((t) => t.id !== trackId);
+  if (libraryTracks.length === before) return false;
+  invalidateArtistsCache();
+  cacheLibrary(getLibraryRootId());
+  return true;
+}
+
 export function invalidateArtistsCache() {
   artistsCache = null;
   artistByIdCache = null;
