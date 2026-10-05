@@ -14,6 +14,7 @@ export const el = {
 
   breadcrumb: document.getElementById("breadcrumb"),
   fileList: document.getElementById("file-list"),
+  pullRefresh: document.getElementById("pull-refresh"),
   statusMsg: document.getElementById("status-msg"),
 
   topBar: document.getElementById("top-bar"),

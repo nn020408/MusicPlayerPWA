@@ -125,6 +125,12 @@ export function openMainFolderView(stack) {
   openFolder(currentFolder().id, false);
 }
 
+// Re-reads the folder on screen (e.g. after the library was rescanned).
+export function reloadCurrentFolder() {
+  const folder = currentFolder();
+  if (folder) openFolder(folder.id, false);
+}
+
 // One level up in the main view (the Android back button). False when already at the top.
 export function goUpOneFolder() {
   if (folderStack.length <= 1) return false;

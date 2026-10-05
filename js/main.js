@@ -18,6 +18,7 @@ import { INTRO_SEEN_KEY, showIntro } from "./ui/intro.js";
 import { pushBackGuard } from "./ui/backButton.js";
 import "./ui/playlists.js";
 import "./ui/settings.js";
+import "./ui/pullToRefresh.js";
 import "./ui/errorLogView.js";
 import "./ui/swipe.js";
 
