@@ -6,9 +6,19 @@
 // this only re-lists the folders rather than reading every song's tags again.
 
 import { el } from "../core/dom.js";
-import { isScanning } from "../data/library.js";
+import { folderPathOf, getLibraryRootId, isScanning } from "../data/library.js";
+import { currentFolder } from "../state/browse.js";
 import { reloadCurrentFolder } from "./folderView.js";
 import { rescanLibrary } from "./libraryWork.js";
+
+// What's on screen decides how much to re-read: inside a folder (at any depth)
+// only that folder and what's beneath it; on the top-level list, the whole library.
+function scopeOnScreen() {
+  const folder = currentFolder();
+  if (!folder || folder.id === getLibraryRootId()) return null;
+  const path = folderPathOf(folder.id);
+  return path === undefined ? null : { folderId: folder.id, path };
+}
 
 const PULL_START_PX = 8; // ignore tiny movements (a tap, a normal scroll)
 const PULL_STRETCH = 0.6; // the strip grows slower than the finger, like a real pull
@@ -31,7 +41,7 @@ async function refresh() {
   el.pullRefresh.classList.add("refreshing");
   setHeight(PULL_REFRESHING_PX, true);
   try {
-    if (!isScanning) await rescanLibrary();
+    if (!isScanning) await rescanLibrary(scopeOnScreen());
     reloadCurrentFolder();
   } finally {
     refreshing = false;

@@ -185,17 +185,34 @@ export function abortScan() {
   if (scanAbortController) scanAbortController.abort();
 }
 
-export async function scanLibrary(onProgress) {
+// The path of a folder under the library root ("" for the root itself), or
+// undefined if the library doesn't know it yet (a cache from before paths were saved).
+export function folderPathOf(folderId) {
+  return libraryFolderPaths[folderId];
+}
+
+// True when a folder path is `base` itself or sits somewhere beneath it.
+function isWithin(path, base) {
+  if (path === undefined) return false;
+  return base === "" || path === base || path.startsWith(base + "/");
+}
+
+// Scans the whole library, or only one part of it: `scope` = { folderId, path }
+// re-reads that folder and everything beneath it. Only that part is replaced —
+// the rest of the library is kept as it is, so a small refresh stays small.
+export async function scanLibrary(onProgress, scope = null) {
   if (isScanning) return libraryTracks;
   isScanning = true;
   scanAbortController = new AbortController();
   const signal = scanAbortController.signal;
   const rootId = getLibraryRootId();
+  const startId = scope ? scope.folderId : rootId;
+  const startPath = scope ? scope.path : "";
   // Artists a previous scan/session already read from the files, so a rescan
   // keeps them instead of forcing the whole indexing pass to start over.
   const prior = new Map(libraryTracks.filter((t) => t.indexed).map((t) => [t.id, (t.audio && t.audio.artist) || ""]));
   const tracks = [];
-  const folderPaths = { [rootId]: "" };
+  const folderPaths = { [startId]: startPath };
   let foldersScanned = 0;
 
   async function handleFolder(folderId) {
@@ -218,13 +235,27 @@ export async function scanLibrary(onProgress) {
   }
 
   try {
-    await runWithConcurrency(SCAN_CONCURRENCY, [rootId], handleFolder);
+    await runWithConcurrency(SCAN_CONCURRENCY, [startId], handleFolder);
     // A stopped-mid-scan result is necessarily incomplete — better to keep
     // whatever the library already had (from before this scan started) than
     // silently replace it with a partial folder tree.
     if (!signal.aborted) {
-      libraryTracks = tracks;
-      libraryFolderPaths = folderPaths;
+      // Everything that was under the scanned part is replaced by what was just
+      // read; everything else stays. For a full scan that is the whole library.
+      if (startPath === "") {
+        // The whole library: replace it outright (paths of songs the library never
+        // knew about can't be matched, so merging would keep them).
+        libraryTracks = tracks;
+        libraryFolderPaths = folderPaths;
+      } else {
+        const replaced = new Set(Object.keys(libraryFolderPaths).filter((id) => isWithin(libraryFolderPaths[id], startPath)));
+        replaced.add(startId);
+        libraryTracks = [...libraryTracks.filter((t) => !replaced.has(t.folderId)), ...tracks];
+        libraryFolderPaths = {
+          ...Object.fromEntries(Object.entries(libraryFolderPaths).filter(([id]) => !replaced.has(id))),
+          ...folderPaths,
+        };
+      }
       artistsFileSync = null; // a new scan may have new songs the file can fill in
       invalidateArtistsCache();
       const cached = cacheLibrary(rootId);

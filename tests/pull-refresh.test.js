@@ -10,7 +10,7 @@ if (!fs.existsSync(path.join(ROOT, "tools", "node_modules", "jsdom"))) {
   console.log("SKIP pull-refresh test (run: cd tools && npm install)");
   process.exit(0);
 }
-const { startApp } = require("./helpers/ui-env");
+const { startApp, TREE } = require("./helpers/ui-env");
 
 let bad = 0;
 const check = (name, ok, detail = "") => {
@@ -57,6 +57,46 @@ const check = (name, ok, detail = "") => {
   await sleep(100);
   check("a pull that starts mid-list does not refresh", scannedAt() === before2);
   list.scrollTop = 0;
+
+  // ---- scoped: inside Rock, a pull refreshes Rock (and beneath it), not the rest of the library
+  const titles = () => JSON.parse(window.localStorage.getItem("libraryIndexCache")).tracks.map((t) => t.name);
+  const waitForScan = async (since) => { for (let i = 0; i < 50 && scannedAt() === since; i++) await sleep(50); };
+  const openRock = async () => {
+    const rockRow = [...document.querySelectorAll("#file-list .folder-row")].find((r) => r.textContent.includes("Rock"));
+    rockRow.click();
+    await sleep(300);
+  };
+  await sleep(50);
+  await openRock();
+  check("inside Rock: the breadcrumb says so", /Rock/.test($("#breadcrumb").textContent));
+
+  // the fake OneDrive changes: a rock song is deleted and another is added, and a
+  // pop song is added that is OUTSIDE the folder on screen
+  const beforeTitles = titles();
+  TREE.rock.songs = TREE.rock.songs.filter(([n]) => n !== "Wonderwall.mp3");
+  TREE.rock.songs.push(["Fresh Rock.mp3", "Metallica"]);
+  TREE.pop.songs.push(["Outside Pop.mp3", "Someone"]);
+  const scopedBefore = scannedAt();
+  touch("touchstart", 100);
+  touch("touchmove", 260);
+  touch("touchend", 260);
+  await waitForScan(scopedBefore);
+  const afterTitles = titles();
+  check("a pull inside Rock removes the song deleted in that folder", !afterTitles.includes("Wonderwall.mp3"));
+  check("a pull inside Rock adds the song added in that folder", afterTitles.includes("Fresh Rock.mp3"));
+  check("a pull inside Rock leaves the rest of the library alone", !afterTitles.includes("Outside Pop.mp3"), `${beforeTitles.length} -> ${afterTitles.length} songs`);
+  check("the library still has the other folders' songs", afterTitles.includes("Ballade Pour Adeline.mp3") && afterTitles.includes("Hips Don't Lie.mp3"));
+
+  // back at the top of the library: a pull re-reads everything, including the pop song
+  await sleep(50);
+  document.querySelector(".crumb").click();
+  await sleep(300);
+  const topBefore = scannedAt();
+  touch("touchstart", 100);
+  touch("touchmove", 260);
+  touch("touchend", 260);
+  await waitForScan(topBefore);
+  check("a pull at the top of the library refreshes everything", titles().includes("Outside Pop.mp3"));
 
   await app.stop();
   process.exit(bad ? 1 : 0);

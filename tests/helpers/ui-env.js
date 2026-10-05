@@ -148,4 +148,4 @@ async function startApp({ returning = true } = {}) {
   };
 }
 
-module.exports = { startApp, savedLibrary };
+module.exports = { startApp, savedLibrary, TREE };

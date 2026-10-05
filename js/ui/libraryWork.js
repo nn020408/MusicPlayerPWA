@@ -139,7 +139,9 @@ function setScanProgressUI(html) {
   }
 }
 
-export async function rescanLibrary() {
+// scope (optional): { folderId, path } to refresh only that folder and everything
+// beneath it; omit it to rescan the whole library (Settings' "Rescan library").
+export async function rescanLibrary(scope = null) {
   // A scan already in progress (e.g. triggered elsewhere) would otherwise
   // keep running alongside this new one, both racing to write libraryTracks.
   await stopLibraryWorkAndWait();
@@ -153,7 +155,7 @@ export async function rescanLibrary() {
     setScanProgressUI(`<span class="spinner"></span>${escapeHtml(warning ? `${msg} (${warning})` : msg)}`);
   };
   try {
-    await scanLibrary(onProgress);
+    await scanLibrary(onProgress, scope);
     libraryLoaded = true;
     const doneMsg = `Done — ${finalFolderCount} folder${finalFolderCount === 1 ? "" : "s"}, ${libraryTracks.length} song${libraryTracks.length === 1 ? "" : "s"} found.`;
     el.scanStatus.textContent = doneMsg;
