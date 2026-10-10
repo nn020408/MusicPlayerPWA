@@ -22,57 +22,59 @@ import { isNative } from "./platform.js";
 // timers keep firing straight through it instead of freezing.
 export let wantsToPlay = false;
 
-let keepAliveEl = null;
+// A plain HTMLAudioElement looping a short WAV was tried first here, on the
+// theory that Android's native decoder behind <audio loop> wasn't gapless and
+// was clicking at every loop restart. Switching to a Web Audio oscillator
+// (below) — which has no loop boundary at all, so couldn't glitch that way —
+// turned the reported "boo boo boo" into one CONTINUOUS tone instead of
+// fixing it, which means that theory was wrong: the tone was never clicking,
+// it was simply loud enough to hear the whole time, and what sounded
+// rhythmic was it poking through as the song's own volume rose and fell.
+// Fixed for real now by dropping the gain about 30dB from what it was
+// (0.0018 -> 0.00004) — still not literal silence (so a player that treats a
+// fully-muted/all-zero stream as "not audible" and withholds the freeze
+// exemption still sees real samples), but far enough under a real song's
+// level that it shouldn't surface even in a quiet passage.
+let audioCtx = null;
+let oscillator = null;
+let gainNode = null;
 
-// Synthesized at runtime rather than a hardcoded blob, so what it actually
-// contains is auditable: a quiet (~-55dBFS) 220Hz tone, well below the
-// loudness of real music — not literal silence, since some engines treat a
-// fully-silent/muted element as not "audible" and won't grant the exemption.
-function makeKeepAliveDataUri() {
-  const sampleRate = 8000;
-  const numSamples = sampleRate; // 1 second, looped
-  const buffer = new ArrayBuffer(44 + numSamples * 2);
-  const view = new DataView(buffer);
-  const writeString = (offset, str) => {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-  };
-  writeString(0, "RIFF");
-  view.setUint32(4, 36 + numSamples * 2, true);
-  writeString(8, "WAVE");
-  writeString(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate
-  view.setUint16(32, 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
-  writeString(36, "data");
-  view.setUint32(40, numSamples * 2, true);
-  const amplitude = 60; // out of 32767 (~ -55dBFS)
-  for (let i = 0; i < numSamples; i++) {
-    const sample = Math.round(amplitude * Math.sin((2 * Math.PI * 220 * i) / sampleRate));
-    view.setInt16(44 + i * 2, sample, true);
+function startKeepAliveTone() {
+  if (oscillator) return;
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  oscillator = audioCtx.createOscillator();
+  gainNode = audioCtx.createGain();
+  oscillator.frequency.value = 220;
+  gainNode.gain.value = 0.00004; // ~ -88dBFS — see the comment above on why this is so much quieter than it first was
+  oscillator.connect(gainNode).connect(audioCtx.destination);
+  try {
+    oscillator.start();
+  } catch {
+    oscillator = null;
+    gainNode = null;
   }
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return "data:audio/wav;base64," + btoa(binary);
 }
 
-if (isNative()) {
-  keepAliveEl = new Audio(makeKeepAliveDataUri());
-  keepAliveEl.loop = true;
+function stopKeepAliveTone() {
+  if (!oscillator) return;
+  try {
+    oscillator.stop();
+  } catch {}
+  oscillator.disconnect();
+  gainNode.disconnect();
+  oscillator = null;
+  gainNode = null;
 }
 
 let pauseGraceTimer = null;
 
-// Drives keepAliveEl. Called with true wherever playback is started/resumed,
-// and false only where playback intent genuinely ends (sign-out, queue
-// exhausted, retries given up) — deliberately NOT tied to audioEl's own
-// pause/play events, since those also fire for the transient mid-retry pause
-// this exists to survive. A user pause goes through pauseWithGrace() below
-// instead of calling this directly.
+// Drives the keep-alive tone. Called with true wherever playback is
+// started/resumed, and false only where playback intent genuinely ends
+// (sign-out, queue exhausted, retries given up) — deliberately NOT tied to
+// audioEl's own pause/play events, since those also fire for the transient
+// mid-retry pause this exists to survive. A user pause goes through
+// pauseWithGrace() below instead of calling this directly.
 export function setWantsToPlay(value) {
   if (pauseGraceTimer) {
     clearTimeout(pauseGraceTimer);
@@ -80,9 +82,9 @@ export function setWantsToPlay(value) {
   }
   if (wantsToPlay === value) return;
   wantsToPlay = value;
-  if (!keepAliveEl) return;
-  if (value) keepAliveEl.play().catch(() => {});
-  else keepAliveEl.pause();
+  if (!isNative()) return;
+  if (value) startKeepAliveTone();
+  else stopKeepAliveTone();
 }
 
 // A plain user pause (in-app button, or the lock-screen/Bluetooth/car-stereo
