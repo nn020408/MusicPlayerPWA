@@ -96,10 +96,50 @@
     </div>
 
     <!-- Settings overlay -->
+    <!-- Settings: a short list of categories — each opens its own screen
+         below, same "tap in, back out" pattern as Playlists/folders, rather
+         than one long page of every setting at once. -->
     <div id="settings-overlay" class="overlay hidden">
       <div class="overlay-header">
         <h2>Settings</h2>
         <button id="settings-close-btn" class="text-btn">Close</button>
+      </div>
+      <div class="settings-body">
+        <div id="settings-category-list" class="file-list">
+          <div class="row settings-category-row" id="settings-library-btn">
+            <span class="row-icon">📁</span>
+            <span class="row-name">Library</span>
+            <span class="row-chevron">›</span>
+          </div>
+          <div class="row settings-category-row" id="settings-appearance-btn">
+            <span class="row-icon">🎨</span>
+            <span class="row-name">Appearance</span>
+            <span class="row-chevron">›</span>
+          </div>
+          <div class="row settings-category-row" id="settings-backup-btn">
+            <span class="row-icon">💾</span>
+            <span class="row-name">Backup &amp; Restore</span>
+            <span class="row-chevron">›</span>
+          </div>
+          <div class="row settings-category-row" id="settings-help-btn">
+            <span class="row-icon">❓</span>
+            <span class="row-name">Help</span>
+            <span class="row-chevron">›</span>
+          </div>
+          <div class="row settings-category-row" id="settings-account-btn">
+            <span class="row-icon">👤</span>
+            <span class="row-name">Account</span>
+            <span class="row-chevron">›</span>
+          </div>
+        </div>
+        <p class="settings-hint">Version: <span id="app-version-label">—</span></p>
+      </div>
+    </div>
+
+    <div id="settings-library-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="settings-library-back-btn" class="text-btn">‹ Back</button>
+        <h2>Library</h2>
       </div>
       <div class="settings-body">
         <p class="settings-row">Music folder: <strong id="library-root-label">OneDrive (everything)</strong></p>
@@ -107,23 +147,52 @@
         <button id="rescan-library-btn" class="secondary-btn">Rescan library</button>
         <button id="reset-library-btn" class="secondary-btn danger">Reset scan and start from zero</button>
         <p id="scan-status" class="status-msg"></p>
-        <hr />
+      </div>
+    </div>
+
+    <div id="settings-appearance-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="settings-appearance-back-btn" class="text-btn">‹ Back</button>
+        <h2>Appearance</h2>
+      </div>
+      <div class="settings-body">
         <p class="settings-row">Theme</p>
         <div id="theme-list" class="file-list theme-list"></div>
-        <hr />
+      </div>
+    </div>
+
+    <div id="settings-backup-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="settings-backup-back-btn" class="text-btn">‹ Back</button>
+        <h2>Backup &amp; Restore</h2>
+      </div>
+      <div class="settings-body">
         <p class="settings-row">Backup your playlists and search index to a file — safe to do anytime, doesn't affect app speed.</p>
         <button id="backup-btn" class="secondary-btn">Backup to file</button>
         <button id="share-backup-btn" class="secondary-btn">Share backup…</button>
         <button id="restore-btn" class="secondary-btn">Restore from file</button>
         <input id="restore-file-input" type="file" accept="application/json" class="hidden" />
-        <hr />
+      </div>
+    </div>
+
+    <div id="settings-help-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="settings-help-back-btn" class="text-btn">‹ Back</button>
+        <h2>Help</h2>
+      </div>
+      <div class="settings-body">
         <button id="show-intro-btn" class="secondary-btn">📖 Show welcome guide again</button>
-        <hr />
         <button id="error-log-btn" class="secondary-btn">🐞 View error log</button>
-        <hr />
+      </div>
+    </div>
+
+    <div id="settings-account-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="settings-account-back-btn" class="text-btn">‹ Back</button>
+        <h2>Account</h2>
+      </div>
+      <div class="settings-body">
         <button id="sign-out-btn" class="secondary-btn danger">Sign out</button>
-        <hr />
-        <p class="settings-hint">Version: <span id="app-version-label">—</span></p>
       </div>
     </div>
 

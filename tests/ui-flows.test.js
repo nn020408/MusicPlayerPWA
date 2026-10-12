@@ -92,8 +92,31 @@ const check = (name, ok, detail = "") => {
   $("#detail-back-btn").click();
   $("#playlists-close-btn").click();
 
-  // ---- restore a backup file from Settings
+  // ---- Settings: a category list, each opening its own screen
   $("#settings-btn").click();
+  check("flows/settings: opens on the category list, not a sub-screen", !hidden("#settings-overlay") && hidden("#settings-library-overlay") && hidden("#settings-backup-overlay"));
+
+  $("#settings-library-btn").click();
+  check("flows/settings: Library opens and the list closes behind it", !hidden("#settings-library-overlay") && hidden("#settings-overlay"));
+  check("flows/settings: Library shows the chosen folder", $("#library-root-label").textContent.trim().length > 0, $("#library-root-label").textContent);
+  $("#settings-library-back-btn").click();
+  check("flows/settings: back from Library returns to the category list", hidden("#settings-library-overlay") && !hidden("#settings-overlay"));
+
+  $("#settings-appearance-btn").click();
+  check("flows/settings: Appearance shows the theme list", !hidden("#settings-appearance-overlay") && $$("#theme-list .row").length > 0);
+  $("#settings-appearance-back-btn").click();
+
+  $("#settings-help-btn").click();
+  check("flows/settings: Help has the welcome guide and error log buttons", !hidden("#settings-help-overlay") && !!$("#show-intro-btn") && !!$("#error-log-btn"));
+  $("#settings-help-back-btn").click();
+
+  $("#settings-account-btn").click();
+  check("flows/settings: Account has Sign out", !hidden("#settings-account-overlay") && !!$("#sign-out-btn"));
+  $("#settings-account-back-btn").click();
+
+  // ---- restore a backup file, navigating in the way a real tap would
+  $("#settings-backup-btn").click();
+  check("flows/settings: Backup & Restore opens", !hidden("#settings-backup-overlay"));
   const backup = { playlists: [{ id: "restored-1", name: "From Backup", tracks: [] }], libraryCache: JSON.parse(window.localStorage.getItem("libraryIndexCache")) };
   const input = $("#restore-file-input");
   Object.defineProperty(input, "files", { value: [new window.File([JSON.stringify(backup)], "backup.json", { type: "application/json" })], configurable: true });
@@ -102,6 +125,7 @@ const check = (name, ok, detail = "") => {
   await sleep(500);
   check("flows/backup: restoring adds the playlists", JSON.parse(window.localStorage.getItem("playlists")).some((p) => p.name === "From Backup"));
   check("flows/backup: restoring swaps the library in and says so", /Restored — 11 songs|Artists ready — all 11 songs/.test($("#scan-status").textContent), $("#scan-status").textContent);
+  $("#settings-backup-back-btn").click();
   $("#settings-close-btn").click();
 
   const errors = JSON.parse(window.localStorage.getItem("errorLog") || "[]").filter((e) => e.time >= startedAt);

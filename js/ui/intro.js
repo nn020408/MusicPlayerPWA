@@ -80,6 +80,7 @@ el.introRestoreBtn.addEventListener("click", () => {
 });
 
 el.showIntroBtn.addEventListener("click", () => {
+  el.settingsHelpOverlay.classList.add("hidden");
   el.settingsOverlay.classList.add("hidden");
   showIntro(false);
 });

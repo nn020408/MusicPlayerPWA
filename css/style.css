@@ -505,6 +505,8 @@ body.settings-open #now-playing-bar { display: none; }
 
 .settings-body { padding: 16px; padding-bottom: 90px; flex: 1; overflow-y: auto; }
 .settings-row { margin: 4px 0; }
+.settings-category-row .row-name { flex: 1; }
+.settings-category-row .row-chevron { color: var(--text-dim); font-size: 20px; flex-shrink: 0; }
 .settings-hint { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
 .settings-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 .section-title {

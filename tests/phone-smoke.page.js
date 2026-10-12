@@ -78,16 +78,19 @@
     click("#playlists-close-btn");
     check("playlists: overlay closes", await waitFor(() => !visible("#playlists-overlay")));
 
-    // Settings hides the mini player, error log opens and closes
+    // Settings hides the mini player, Help > error log opens and closes
     click("#settings-btn");
     check("settings: overlay opens", await waitFor(() => visible("#settings-overlay")));
     await sleep(100);
     const bar = $("#now-playing-bar");
     check("settings: mini player is hidden", getComputedStyle(bar).display === "none");
+    click("#settings-help-btn");
+    check("settings: Help screen opens", await waitFor(() => visible("#settings-help-overlay")));
     click("#error-log-btn");
     check("error log: opens", await waitFor(() => visible("#error-log-overlay")));
     click("#error-log-back-btn");
     check("error log: closes", await waitFor(() => !visible("#error-log-overlay")));
+    click("#settings-help-back-btn");
     click("#settings-close-btn");
     check("settings: overlay closes", await waitFor(() => !visible("#settings-overlay")));
     await sleep(100);
@@ -96,6 +99,8 @@
     // Welcome guide sits above the mini player so Next is reachable
     click("#settings-btn");
     await waitFor(() => visible("#settings-overlay"));
+    click("#settings-help-btn");
+    await waitFor(() => visible("#settings-help-overlay"));
     click("#show-intro-btn");
     check("intro: welcome guide opens", await waitFor(() => visible("#intro-overlay")));
     check("intro: it sits above the mini player", Number(getComputedStyle($("#intro-overlay")).zIndex) > Number(getComputedStyle(bar).zIndex));
@@ -110,6 +115,7 @@
       await sleep(120);
     }
     await waitFor(() => !visible("#intro-overlay"), 3000);
+    if (visible("#settings-help-overlay")) click("#settings-help-back-btn");
     if (visible("#settings-overlay")) click("#settings-close-btn");
     await sleep(150);
 
@@ -147,6 +153,8 @@
       window.confirm = () => true; // the Reset button asks first
       click("#settings-btn");
       await waitFor(() => visible("#settings-overlay"));
+      click("#settings-library-btn");
+      await waitFor(() => visible("#settings-library-overlay"));
       const t0 = Date.now();
       click("#reset-library-btn");
       const done = () => /Artists ready|Artists read for/.test($("#scan-status").textContent);
@@ -157,6 +165,7 @@
       const withArtist = tracks.filter((t) => t.audio && t.audio.artist).length;
       const read = tracks.filter((t) => t.indexed).length;
       check("deep/library: artists are filled in", finished && read === tracks.length && withArtist > tracks.length * 0.8, Math.round((Date.now() - t0) / 1000) + "s total; " + read + "/" + tracks.length + " read, " + withArtist + " with an artist; " + $("#scan-status").textContent);
+      click("#settings-library-back-btn");
       click("#settings-close-btn");
       await sleep(200);
     } catch (err) {

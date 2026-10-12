@@ -130,11 +130,13 @@ el.signOutBtn.addEventListener("click", async () => {
   markLibraryStale();
   resetPlayer();
   el.nowPlayingBar.classList.add("hidden");
-  // Settings (where this button lives) is a separate fixed-position overlay
-  // from #app-screen — showLogin() below only hides #app-screen, so without
-  // this, Settings (or any other overlay left open) would still be sitting
-  // on top of everything the next time showApp() runs, making it look like
-  // sign-in "took you to Settings" instead of the folder view underneath.
+  // Settings (where this button lives, inside its Account screen) is a
+  // separate fixed-position overlay from #app-screen — showLogin() below
+  // only hides #app-screen, so without this, Settings (or any other overlay
+  // left open) would still be sitting on top of everything the next time
+  // showApp() runs, making it look like sign-in "took you to Settings"
+  // instead of the folder view underneath.
+  el.settingsAccountOverlay.classList.add("hidden");
   el.settingsOverlay.classList.add("hidden");
   el.searchOverlay.classList.add("hidden");
   el.playlistsOverlay.classList.add("hidden");

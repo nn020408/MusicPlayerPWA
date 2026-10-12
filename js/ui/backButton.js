@@ -52,12 +52,22 @@ function handleBackPress() {
   if (!el.introOverlay.classList.contains("hidden")) return handleIntroBack();
   if (!el.folderPickerOverlay.classList.contains("hidden")) return handleFolderPickerBack();
   if (!el.errorLogOverlay.classList.contains("hidden")) {
-    // Opened from within Settings (and sits on top of it, still open
-    // underneath) — close this first so back steps out one layer at a time,
-    // same as everything else, instead of falling through to the Settings
-    // check below and closing Settings while the error log stays open.
+    // Opened from within Settings' Help screen (and sits on top of it, still
+    // open underneath) — close this first so back steps out one layer at a
+    // time, same as everything else, instead of falling through to the
+    // category checks below and closing Help while the error log stays open.
     el.errorLogOverlay.classList.add("hidden");
     return true;
+  }
+  // Settings' category screens (Library/Appearance/Backup/Help/Account) sit
+  // on top of the category list the same way — one step back returns to it,
+  // same "step out one layer at a time" rule as everything above.
+  for (const overlay of [el.settingsLibraryOverlay, el.settingsAppearanceOverlay, el.settingsBackupOverlay, el.settingsHelpOverlay, el.settingsAccountOverlay]) {
+    if (!overlay.classList.contains("hidden")) {
+      overlay.classList.add("hidden");
+      el.settingsOverlay.classList.remove("hidden");
+      return true;
+    }
   }
   if (!el.settingsOverlay.classList.contains("hidden")) {
     el.settingsOverlay.classList.add("hidden");

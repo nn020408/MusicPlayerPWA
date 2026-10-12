@@ -1,5 +1,6 @@
-// The Settings screen's buttons: change folder, rescan, reset, and
-// showing/hiding the screen.
+// Settings: a short list of categories (Library, Appearance, Backup, Help,
+// Account) — each opens its own screen below, so Settings itself stays a
+// quick scan instead of one long page of every control at once.
 
 import { el } from "../core/dom.js";
 import { getLibraryRootLabel, resetLibrary } from "../data/library.js";
@@ -9,26 +10,45 @@ import { libraryEvents, markLibraryStale, rescanLibrary, stopLibraryWorkAndWait,
 import { openFolderPicker } from "./folderPicker.js";
 import { renderThemeList } from "./themes.js";
 
-el.settingsBtn.addEventListener("click", () => {
-  el.libraryRootLabel.textContent = getLibraryRootLabel();
-  // Don't clear scanStatus here — it already reflects reality (blank if
-  // never scanned, live progress if scanning, or the "Done" summary), and
-  // wiping it was erasing the auto-scan's result the moment you opened
-  // Settings to go check it.
-  renderThemeList();
-  updateRescanButtonUI(); // reflects a pass that's been running since before Settings was opened
-  el.settingsOverlay.classList.remove("hidden");
-});
+el.settingsBtn.addEventListener("click", () => el.settingsOverlay.classList.remove("hidden"));
 
 el.settingsCloseBtn.addEventListener("click", () => el.settingsOverlay.classList.add("hidden"));
 
-// The mini player floats above every overlay (z-index) and covered the bottom of
-// Settings. Watching the overlay's own class means every way of closing it
-// (Close button, Android back, opening another screen from it) restores the
-// player without each path having to remember to.
-new MutationObserver(() => {
-  document.body.classList.toggle("settings-open", !el.settingsOverlay.classList.contains("hidden"));
-}).observe(el.settingsOverlay, { attributes: true, attributeFilter: ["class"] });
+// Each category: the row that opens it, the screen it opens, and what (if
+// anything) that screen needs refreshed right before it's shown — e.g.
+// Library's scan status or Appearance's theme list, which can have changed
+// since the last time this category was open.
+const CATEGORIES = [
+  { btn: "settingsLibraryBtn", overlay: "settingsLibraryOverlay", backBtn: "settingsLibraryBackBtn", onOpen: () => { el.libraryRootLabel.textContent = getLibraryRootLabel(); updateRescanButtonUI(); } },
+  { btn: "settingsAppearanceBtn", overlay: "settingsAppearanceOverlay", backBtn: "settingsAppearanceBackBtn", onOpen: renderThemeList },
+  { btn: "settingsBackupBtn", overlay: "settingsBackupOverlay", backBtn: "settingsBackupBackBtn" },
+  { btn: "settingsHelpBtn", overlay: "settingsHelpOverlay", backBtn: "settingsHelpBackBtn" },
+  { btn: "settingsAccountBtn", overlay: "settingsAccountOverlay", backBtn: "settingsAccountBackBtn" },
+];
+
+for (const { btn, overlay, backBtn, onOpen } of CATEGORIES) {
+  el[btn].addEventListener("click", () => {
+    onOpen && onOpen();
+    el.settingsOverlay.classList.add("hidden");
+    el[overlay].classList.remove("hidden");
+  });
+  el[backBtn].addEventListener("click", () => {
+    el[overlay].classList.add("hidden");
+    el.settingsOverlay.classList.remove("hidden");
+  });
+}
+
+// The mini player floats above every overlay (z-index) and covered the
+// bottom of Settings and its category screens. Watching every one of their
+// classes means every way of closing any of them (Close, Back, Android back,
+// opening another screen from one) restores the player without each path
+// having to remember to.
+const settingsOverlays = [el.settingsOverlay, el.settingsLibraryOverlay, el.settingsAppearanceOverlay, el.settingsBackupOverlay, el.settingsHelpOverlay, el.settingsAccountOverlay];
+function updateSettingsOpenClass() {
+  document.body.classList.toggle("settings-open", settingsOverlays.some((o) => !o.classList.contains("hidden")));
+}
+const settingsObserver = new MutationObserver(updateSettingsOpenClass);
+settingsOverlays.forEach((o) => settingsObserver.observe(o, { attributes: true, attributeFilter: ["class"] }));
 
 // Unlike "Rescan library" (which keeps every artist already read, so adding a
 // few songs doesn't redo the whole job), this throws all of it away and starts
@@ -62,6 +82,7 @@ el.rescanLibraryBtn.addEventListener("click", () => {
 });
 
 el.changeFolderBtn.addEventListener("click", () => {
+  el.settingsLibraryOverlay.classList.add("hidden");
   el.settingsOverlay.classList.add("hidden");
   openFolderPicker("change");
 });
