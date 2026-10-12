@@ -2,7 +2,7 @@
 // We deliberately do NOT cache audio or Graph API responses since this app
 // is streaming-only by design (no offline playback).
 
-const CACHE_NAME = "musicplayer-shell-v143";
+const CACHE_NAME = "musicplayer-shell-v144";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -48,6 +48,7 @@ const SHELL_FILES = [
   "./js/ui/swipe.js",
   "./js/ui/themes.js",
   "./js/ui/toast.js",
+  "./js/ui/trackActions.js",
   "./js/ui/trackRow.js",
   "./js/ui/upNext.js",
   "./js/vendor/capacitor-core.js",

@@ -81,7 +81,10 @@ const check = (name, ok, detail = "") => {
   tripRow.click();
   await sleep(150);
   check("flows/playlists: opening it shows its song", !hidden("#detail-overlay") && $$("#detail-list .track-row").length === 1);
-  $("#detail-list .track-row .row-menu-btn").click(); // for a playlist the menu removes the song
+  $("#detail-list .track-row .row-menu-btn").click(); // opens the track actions menu
+  await sleep(100);
+  check("flows/playlists: the menu offers removing from this playlist", !hidden("#track-actions-modal") && !hidden("#track-remove-playlist-btn"));
+  $("#track-remove-playlist-btn").click();
   await sleep(200);
   check("flows/playlists: removing the song empties the list", $$("#detail-list .track-row").length === 0 && /No songs/.test($("#detail-list").textContent));
   const tripRow2 = $$("#playlists-list .row").find((r) => r.textContent.includes("Road Trip"));

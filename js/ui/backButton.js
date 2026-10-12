@@ -31,6 +31,10 @@ function handleBackPress() {
     el.folderActionsModal.classList.add("hidden");
     return true;
   }
+  if (!el.trackActionsModal.classList.contains("hidden")) {
+    el.trackActionsModal.classList.add("hidden");
+    return true;
+  }
   if (!el.upNextOverlay.classList.contains("hidden")) {
     // Sits above the full player (it's opened from within it) — close this
     // first so back steps out one layer at a time, same as everything else.

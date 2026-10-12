@@ -1,10 +1,10 @@
 // The song list overlay used for a playlist or an artist.
 
 import { el } from "../core/dom.js";
-import { loadPlaylists, removeTrackFromPlaylist } from "../data/playlists.js";
+import { loadPlaylists } from "../data/playlists.js";
 import { playCurrent, queue, setQueue, setUpcomingOrder, shuffleOn, toggleShuffle } from "../player/player.js";
-import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { trackRow } from "./trackRow.js";
+import { openTrackActionsModal } from "./trackActions.js";
 
 // onChanged (optional) is called after a song is removed from the playlist being shown.
 export function openDetailList(title, tracks, playlistId, onChanged) {
@@ -32,18 +32,19 @@ export function openDetailList(title, tracks, playlistId, onChanged) {
           setQueue(tracks, index);
           playCurrent();
         },
-        onMenu: () => {
-          if (playlistId) {
-            if (confirm(`Remove "${track.name.replace(/\.[^/.]+$/, "")}" from this playlist?`)) {
-              removeTrackFromPlaylist(playlistId, track.id);
+        onMenu: () =>
+          openTrackActionsModal(track, {
+            playlistId,
+            onRemovedFromPlaylist: () => {
               const updated = loadPlaylists().find((p) => p.id === playlistId);
               openDetailList(title, updated ? updated.tracks : [], playlistId, onChanged);
               if (onChanged) onChanged();
-            }
-          } else {
-            openAddToPlaylistModal(track);
-          }
-        },
+            },
+            onDeleted: () => {
+              openDetailList(title, tracks.filter((t) => t.id !== track.id), playlistId, onChanged);
+              if (onChanged) onChanged();
+            },
+          }),
       })
     );
   });

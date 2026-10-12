@@ -96,3 +96,17 @@ export function removeTrackFromPlaylist(playlistId, trackId) {
   pl.tracks = pl.tracks.filter((t) => t.id !== trackId);
   savePlaylists(playlists);
 }
+
+// Used when a song is deleted outright (see ui/trackActions.js) — it needs
+// to disappear from every playlist it was added to, not just the one (if
+// any) it was being viewed from.
+export function removeTrackFromAllPlaylists(trackId) {
+  const playlists = loadPlaylists();
+  let changed = false;
+  playlists.forEach((pl) => {
+    const before = pl.tracks.length;
+    pl.tracks = pl.tracks.filter((t) => t.id !== trackId);
+    if (pl.tracks.length !== before) changed = true;
+  });
+  if (changed) savePlaylists(playlists);
+}

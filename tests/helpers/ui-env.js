@@ -27,6 +27,11 @@ const TREE = {
 const id = (folder, name) => `${folder}/${name}`;
 // song ids the fake OneDrive has deleted: asking for their download link gives 404
 const GONE = new Set();
+// song ids a DELETE request should fail for (simulates e.g. a permission
+// error) — anything not in here succeeds. DELETED records every id actually
+// sent a (successful) DELETE, in order, so a test can assert on it.
+const FAIL_DELETE = new Set();
+const DELETED = [];
 
 function graphResponse(url) {
   const m = /\/me\/drive\/(?:root|items\/([^/?]+))(?:\/children)?/.exec(url);
@@ -38,7 +43,7 @@ function graphResponse(url) {
     return {
       value: [
         ...f.folders.map((fid) => ({ id: fid, name: TREE[fid].name, folder: { childCount: 1 } })),
-        ...f.songs.map(([name]) => ({ id: id(folderId, name), name, file: { mimeType: "audio/mpeg" }, "@microsoft.graph.downloadUrl": "https://files.test/" + encodeURIComponent(id(folderId, name)) })),
+        ...f.songs.filter(([name]) => !DELETED.includes(id(folderId, name))).map(([name]) => ({ id: id(folderId, name), name, file: { mimeType: "audio/mpeg" }, "@microsoft.graph.downloadUrl": "https://files.test/" + encodeURIComponent(id(folderId, name)) })),
       ],
     };
   }
@@ -127,11 +132,17 @@ async function startApp({ returning = true } = {}) {
     },
   });
   const requests = [];
-  define("fetch", async (url) => {
+  define("fetch", async (url, options) => {
     requests.push(String(url));
     const u = String(url);
     const itemPath = u.split("/me/drive/items/")[1];
-    if (itemPath && GONE.has(decodeURIComponent(itemPath.split("?")[0]))) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+    const itemId = itemPath ? decodeURIComponent(itemPath.split("?")[0]) : null;
+    if (options && options.method === "DELETE") {
+      if (itemId && FAIL_DELETE.has(itemId)) return { ok: false, status: 403, json: async () => ({}), text: async () => "" };
+      if (itemId) DELETED.push(itemId);
+      return { ok: true, status: 204, json: async () => ({}), text: async () => "" };
+    }
+    if (itemId && GONE.has(itemId)) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
     if (u.startsWith("https://files.test/")) return { ok: true, status: 206, headers: { get: () => null }, body: null, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     return { ok: true, status: 200, json: async () => graphResponse(u), text: async () => "" };
   });
@@ -152,4 +163,4 @@ async function startApp({ returning = true } = {}) {
   };
 }
 
-module.exports = { startApp, savedLibrary, TREE, GONE };
+module.exports = { startApp, savedLibrary, TREE, GONE, FAIL_DELETE, DELETED };

@@ -98,6 +98,7 @@ export const el = {
 
   fullPlayer: document.getElementById("full-player"),
   fullPlayerCloseBtn: document.getElementById("full-player-close-btn"),
+  fullPlayerDeleteBtn: document.getElementById("full-player-delete-btn"),
   upNextBtn: document.getElementById("up-next-btn"),
   addToPlaylistBtn: document.getElementById("add-to-playlist-btn"),
   lyricsBtn: document.getElementById("lyrics-btn"),
@@ -134,6 +135,13 @@ export const el = {
   playlistDeleteBtn: document.getElementById("playlist-delete-btn"),
   playlistClearBtn: document.getElementById("playlist-clear-btn"),
   playlistActionsCancelBtn: document.getElementById("playlist-actions-cancel-btn"),
+
+  trackActionsModal: document.getElementById("track-actions-modal"),
+  trackActionsTitle: document.getElementById("track-actions-title"),
+  trackAddPlaylistBtn: document.getElementById("track-add-playlist-btn"),
+  trackRemovePlaylistBtn: document.getElementById("track-remove-playlist-btn"),
+  trackDeleteBtn: document.getElementById("track-delete-btn"),
+  trackActionsCancelBtn: document.getElementById("track-actions-cancel-btn"),
 
   upNextOverlay: document.getElementById("up-next-overlay"),
   upNextCloseBtn: document.getElementById("up-next-close-btn"),

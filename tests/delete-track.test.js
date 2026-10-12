@@ -1,0 +1,100 @@
+// Deleting a song from OneDrive itself (the ⋮ menu's "Delete from OneDrive",
+// and the full player's trash icon): asks first, calls Graph's DELETE, drops
+// it from the library cache and every playlist, and if it was playing moves
+// on — same recovery path as a song OneDrive already reports gone (404).
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.join(__dirname, "..");
+process.chdir(ROOT);
+if (!fs.existsSync(path.join(ROOT, "tools", "node_modules", "jsdom"))) {
+  console.log("SKIP delete-track test (run: cd tools && npm install)");
+  process.exit(0);
+}
+const { startApp, FAIL_DELETE, DELETED } = require("./helpers/ui-env");
+
+let bad = 0;
+const check = (name, ok, detail = "") => {
+  if (!ok) bad++;
+  console.log((ok ? "PASS " : "FAIL ") + name + (detail ? "  [" + detail + "]" : ""));
+};
+
+(async () => {
+  const app = await startApp();
+  const { $, $$, sleep, window } = app;
+  const titles = () => JSON.parse(window.localStorage.getItem("libraryIndexCache")).tracks.map((t) => t.name);
+  const hidden = (sel) => $(sel).classList.contains("hidden");
+
+  // ---- the menu, and cancelling out of it changes nothing
+  $$("#file-list .folder-row").find((r) => r.textContent.includes("Pop")).click();
+  await sleep(300);
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")).querySelector(".row-menu-btn").click();
+  await sleep(100);
+  check("the menu offers Delete from OneDrive", !hidden("#track-actions-modal") && !hidden("#track-delete-btn"));
+  check("no playlist to remove from here, so that option stays hidden", hidden("#track-remove-playlist-btn"));
+  $("#track-actions-cancel-btn").click();
+  check("cancel just closes the menu", hidden("#track-actions-modal") && titles().includes("Who Knew.mp3"));
+
+  // ---- a failed delete (e.g. no permission) leaves everything as it was
+  FAIL_DELETE.add("pop/Who Knew.mp3");
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")).querySelector(".row-menu-btn").click();
+  await sleep(50);
+  $("#track-delete-btn").click();
+  await sleep(200);
+  check("a failed delete says so", /Couldn't delete "Who Knew"/.test($("#toast").textContent), $("#toast").textContent);
+  check("a failed delete doesn't touch the library", titles().includes("Who Knew.mp3"));
+  check("a failed delete leaves the row in the folder", !!$$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")));
+  FAIL_DELETE.delete("pop/Who Knew.mp3");
+
+  // ---- a real delete: Graph gets the DELETE, the library and the row both drop it
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")).querySelector(".row-menu-btn").click();
+  await sleep(50);
+  $("#track-delete-btn").click();
+  await sleep(300);
+  check("Graph got the delete request", DELETED.includes("pop/Who Knew.mp3"), DELETED.join(","));
+  check("the song is dropped from the library cache", !titles().includes("Who Knew.mp3"));
+  check("the other songs in the folder stay", titles().includes("Hips Don't Lie.mp3") && titles().includes("Baila Conmigo.mp3"));
+  check("its row disappears from the folder view", !$$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")));
+  check("a toast confirms the delete", /Deleted "Who Knew"/.test($("#toast").textContent));
+
+  // ---- deleting the song currently playing moves on, via the full player's trash icon
+  // (picks the one NOT last in the (now 2-song, alphabetical) folder queue —
+  // playNext() deliberately doesn't wrap at the end with repeat off, same as
+  // the dead-file/404 path it shares, so deleting the last song wouldn't
+  // advance anywhere and this check would be testing the wrong thing)
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Baila Conmigo")).click();
+  await sleep(300);
+  check("setup: Baila Conmigo is now playing", /Baila Conmigo/.test($("#now-playing-title").textContent));
+  $("#now-playing-bar .np-title").click();
+  await sleep(100);
+  $("#full-player-delete-btn").click();
+  await sleep(300);
+  check("deleting the playing song moves on to another one", /Hips Don't Lie/.test($("#now-playing-title").textContent), $("#now-playing-title").textContent);
+  check("it's gone from the library cache too", !titles().includes("Baila Conmigo.mp3"));
+
+  // ---- deleting a song also drops it from any playlist it was added to
+  $("#full-player-close-btn").click();
+  $$("#breadcrumb .crumb")[0].click(); // back to the library root
+  await sleep(200);
+  $$("#file-list .folder-row").find((r) => r.textContent.includes("Salsa")).click();
+  await sleep(300);
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Pedro Navaja")).querySelector(".row-menu-btn").click();
+  await sleep(50);
+  $("#track-add-playlist-btn").click();
+  await sleep(50);
+  window.prompt = () => "Road Trip";
+  globalThis.prompt = window.prompt;
+  $("#add-playlist-new-btn").click();
+  await sleep(100);
+  const beforeDelete = JSON.parse(window.localStorage.getItem("playlists") || "[]").find((p) => p.name === "Road Trip");
+  check("setup: the song was added to a playlist", !!beforeDelete && beforeDelete.tracks.some((t) => t.name === "Pedro Navaja.mp3"));
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Pedro Navaja")).querySelector(".row-menu-btn").click();
+  await sleep(50);
+  $("#track-delete-btn").click();
+  await sleep(300);
+  const afterDelete = JSON.parse(window.localStorage.getItem("playlists") || "[]").find((p) => p.name === "Road Trip");
+  check("deleting it drops it from the playlist too", !!afterDelete && !afterDelete.tracks.some((t) => t.name === "Pedro Navaja.mp3"), JSON.stringify(afterDelete && afterDelete.tracks));
+
+  await app.stop();
+  process.exit(bad ? 1 : 0);
+})().catch((e) => { console.log("FAIL delete-track test crashed: " + (e && e.stack || e)); process.exit(1); });

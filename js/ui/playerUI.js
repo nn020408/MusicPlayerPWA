@@ -7,6 +7,7 @@ import { findOnlineArtwork } from "../data/artwork.js";
 import { getThumbnailUrl } from "../data/graph.js";
 import { audioEl, currentTrack, cycleRepeat, player, playNext, playPause, playPrevious, seekTo, toggleShuffle } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
+import { deleteTrackWithConfirm } from "./trackActions.js";
 import { paintFallbackArt } from "./fallbackArt.js";
 import { closeLyricsView, lyricsViewActive, provideRealTags, showLyricsForCurrentTrack, startTrackTags, updateActiveLyricsLine } from "./lyrics.js";
 import { hideToast, showToast } from "./toast.js";
@@ -323,4 +324,12 @@ el.fullPlayerCloseBtn.addEventListener("click", closeFullPlayer);
 el.addToPlaylistBtn.addEventListener("click", () => {
   const track = currentTrack();
   if (track) openAddToPlaylistModal(track);
+});
+
+// No background list to refresh here (the full player isn't tied to one) —
+// whichever list led here picks up the removal next time it loads/reloads,
+// same gap as a dead-file removal leaving its row until the folder reloads.
+el.fullPlayerDeleteBtn.addEventListener("click", () => {
+  const track = currentTrack();
+  if (track) deleteTrackWithConfirm(track);
 });

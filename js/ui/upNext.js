@@ -4,9 +4,9 @@ import { escapeHtml } from "../core/text.js";
 import { el } from "../core/dom.js";
 import { libraryArtistFor } from "../data/library.js";
 import { currentTrack, getUpcomingTracks, playIndex, queue, repeatMode } from "../player/player.js";
-import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { EQUALIZER_ICON, trackRow } from "./trackRow.js";
 import { enableQueueDragReorder } from "./detailOverlay.js";
+import { openTrackActionsModal } from "./trackActions.js";
 
 // Jumps within the CURRENT queue/play order (via playIndex) rather than
 // replacing it with setQueue — tapping an upcoming track should just skip
@@ -47,7 +47,7 @@ export function openUpNextView() {
           el.upNextOverlay.classList.add("hidden");
           if (idx !== -1) playIndex(idx);
         },
-        onMenu: () => openAddToPlaylistModal(track),
+        onMenu: () => openTrackActionsModal(track, { onDeleted: openUpNextView }),
       })
     );
   });

@@ -7,10 +7,10 @@ import { runWithConcurrency } from "../data/library.js";
 import { setIndexPriorityFolder } from "../data/indexer.js";
 import { playCurrent, setQueue } from "../player/player.js";
 import { currentFolder, currentTracks, folderStack, pushFolder, replaceFolderStack, setListing, truncateFolderStack } from "../state/browse.js";
-import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { enterSelectMode, exitSelectMode, selectMode, setupLongPress, toggleItemSelection } from "./select.js";
 import { trackRow } from "./trackRow.js";
 import { openFolderActionsModal } from "./folderActions.js";
+import { openTrackActionsModal } from "./trackActions.js";
 
 function renderBreadcrumb() {
   el.breadcrumb.innerHTML = "";
@@ -99,7 +99,7 @@ async function openFolder(folderId, pushToStack, folderName) {
             setQueue(currentTracks, index);
             playCurrent();
           },
-          onMenu: () => openAddToPlaylistModal(track),
+          onMenu: () => openTrackActionsModal(track, { onDeleted: reloadCurrentFolder }),
         })
       );
     });

@@ -49,6 +49,24 @@ async function graphGet(pathOrUrl, { priority } = {}) {
   return res.json();
 }
 
+// Permanently deletes a song from OneDrive itself (sends it to the OneDrive
+// recycle bin, same as deleting it there) — needs the Files.ReadWrite scope
+// in core/config.js, not just Files.Read. A 404 here means it's already
+// gone, which is the outcome the caller wanted anyway, so that's treated as
+// success rather than an error.
+export async function deleteItem(itemId) {
+  const token = await getAccessToken();
+  const res = await fetch(`${GRAPH_ROOT}/me/drive/items/${itemId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const err = new Error(`Couldn't delete: HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
 // Revisiting a folder (breadcrumb back, reopening the app on the same
 // folder, the library scan re-touching a folder already browsed) used to
 // re-fetch it from Graph every single time. Cached per session — cleared

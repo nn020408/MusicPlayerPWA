@@ -7,9 +7,9 @@ import { getArtists, searchArtists, searchLibrary, songsByArtistKey } from "../d
 import { indexCounts, isIndexing } from "../data/indexer.js";
 import { playCurrent, setQueue } from "../player/player.js";
 import { ensureLibraryLoaded, indexState, kickOffIndexing, libraryEvents, libraryLoaded } from "./libraryWork.js";
-import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { trackRow } from "./trackRow.js";
 import { openDetailList } from "./detailOverlay.js";
+import { openTrackActionsModal } from "./trackActions.js";
 
 // One box matches song name and artist (accent-insensitive, any word order).
 // Results come in sections: matching artists first, then songs. With nothing
@@ -175,7 +175,7 @@ function runSearch() {
             setQueue(songs, index);
             playCurrent();
           },
-          onMenu: () => openAddToPlaylistModal(track),
+          onMenu: () => openTrackActionsModal(track, { onDeleted: runSearch }),
         })
       );
     });
