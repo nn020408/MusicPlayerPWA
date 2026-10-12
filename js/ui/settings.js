@@ -8,7 +8,6 @@ import { showToast } from "./toast.js";
 import { libraryEvents, markLibraryStale, rescanLibrary, stopLibraryWorkAndWait, updateRescanButtonUI } from "./libraryWork.js";
 import { openFolderPicker } from "./folderPicker.js";
 import { renderThemeList } from "./themes.js";
-import { isVolumeNormalizeOn, setVolumeNormalize } from "../player/normalize.js";
 
 el.settingsBtn.addEventListener("click", () => {
   el.libraryRootLabel.textContent = getLibraryRootLabel();
@@ -18,11 +17,8 @@ el.settingsBtn.addEventListener("click", () => {
   // Settings to go check it.
   renderThemeList();
   updateRescanButtonUI(); // reflects a pass that's been running since before Settings was opened
-  el.volumeNormalizeToggle.checked = isVolumeNormalizeOn();
   el.settingsOverlay.classList.remove("hidden");
 });
-
-el.volumeNormalizeToggle.addEventListener("change", () => setVolumeNormalize(el.volumeNormalizeToggle.checked));
 
 el.settingsCloseBtn.addEventListener("click", () => el.settingsOverlay.classList.add("hidden"));
 

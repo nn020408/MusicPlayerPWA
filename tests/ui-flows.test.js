@@ -102,15 +102,6 @@ const check = (name, ok, detail = "") => {
   await sleep(500);
   check("flows/backup: restoring adds the playlists", JSON.parse(window.localStorage.getItem("playlists")).some((p) => p.name === "From Backup"));
   check("flows/backup: restoring swaps the library in and says so", /Restored — 11 songs|Artists ready — all 11 songs/.test($("#scan-status").textContent), $("#scan-status").textContent);
-
-  // ---- volume normalization toggle: off by default, persists once turned on
-  check("flows/settings: volume normalization starts off", !$("#volume-normalize-toggle").checked && window.localStorage.getItem("volumeNormalize") !== "1");
-  $("#volume-normalize-toggle").click();
-  await sleep(50);
-  check("flows/settings: turning it on saves the setting", window.localStorage.getItem("volumeNormalize") === "1");
-  $("#settings-close-btn").click();
-  $("#settings-btn").click();
-  check("flows/settings: reopening Settings shows it still on", $("#volume-normalize-toggle").checked);
   $("#settings-close-btn").click();
 
   const errors = JSON.parse(window.localStorage.getItem("errorLog") || "[]").filter((e) => e.time >= startedAt);

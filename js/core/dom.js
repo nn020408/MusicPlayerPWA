@@ -51,7 +51,6 @@ export const el = {
   restoreFileInput: document.getElementById("restore-file-input"),
   scanStatus: document.getElementById("scan-status"),
   themeList: document.getElementById("theme-list"),
-  volumeNormalizeToggle: document.getElementById("volume-normalize-toggle"),
   appVersionLabel: document.getElementById("app-version-label"),
   loginVersionLabel: document.getElementById("login-version-label"),
   showIntroBtn: document.getElementById("show-intro-btn"),
