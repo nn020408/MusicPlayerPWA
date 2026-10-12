@@ -22,49 +22,71 @@ import { isNative } from "./platform.js";
 // timers keep firing straight through it instead of freezing.
 export let wantsToPlay = false;
 
-// A plain HTMLAudioElement looping a short WAV was tried first here, on the
-// theory that Android's native decoder behind <audio loop> wasn't gapless and
-// was clicking at every loop restart. Switching to a Web Audio oscillator
-// (below) — which has no loop boundary at all, so couldn't glitch that way —
-// turned the reported "boo boo boo" into one CONTINUOUS tone instead of
-// fixing it, which means that theory was wrong: the tone was never clicking,
-// it was simply loud enough to hear the whole time, and what sounded
-// rhythmic was it poking through as the song's own volume rose and fell.
-// Fixed for real now by dropping the gain about 30dB from what it was
-// (0.0018 -> 0.00004) — still not literal silence (so a player that treats a
-// fully-muted/all-zero stream as "not audible" and withholds the freeze
-// exemption still sees real samples), but far enough under a real song's
-// level that it shouldn't surface even in a quiet passage.
-let audioCtx = null;
-let oscillator = null;
-let gainNode = null;
-
-function startKeepAliveTone() {
-  if (oscillator) return;
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
-  oscillator = audioCtx.createOscillator();
-  gainNode = audioCtx.createGain();
-  oscillator.frequency.value = 220;
-  gainNode.gain.value = 0.00004; // ~ -88dBFS — see the comment above on why this is so much quieter than it first was
-  oscillator.connect(gainNode).connect(audioCtx.destination);
-  try {
-    oscillator.start();
-  } catch {
-    oscillator = null;
-    gainNode = null;
+// This has been through two earlier designs, both wrong in instructive ways:
+//
+// 1) A plain HTMLAudioElement looping a short WAV, on the theory that
+//    Android's native decoder behind <audio loop> wasn't gapless and was
+//    clicking at every loop restart.
+// 2) Switching to a Web Audio oscillator — no loop boundary at all, so it
+//    couldn't glitch that way — which turned the reported "boo boo boo" into
+//    one CONTINUOUS tone instead of fixing it. That meant (1)'s theory was
+//    wrong: the tone was never clicking, it was simply loud enough to hear
+//    the whole time, and what sounded rhythmic was it poking through as the
+//    song's own volume rose and fell. Dropping the gain ~30dB (0.0018 ->
+//    0.00004) did fix the loudness — but a few days later, lock-screen/
+//    notification controls were reported gone after the app had been
+//    backgrounded a while, "fixed" by force-restarting it. Root cause: an
+//    AudioContext (unlike an <audio> element) can be suspended by Android
+//    while backgrounded, and once that happens this tone actually stops —
+//    silently losing the freeze exemption it exists for, which is exactly
+//    what lets player.js's sessionHeartbeat() keep re-announcing the media
+//    session every minute (see the comment above it). An <audio> element
+//    doesn't have that failure mode.
+//
+// So: back to design (1), keeping only the real lesson from (2) — it's
+// audioEl.volume that was too loud, not the loop itself. Generated at full
+// amplitude; volume (below) does the attenuating, the same plain property
+// any in-app volume slider would use.
+function makeKeepAliveDataUri() {
+  const sampleRate = 8000;
+  const numSamples = sampleRate; // 1 second, looped — 220 cycles of a 220Hz
+  // tone fit exactly into this many samples, so the loop point is sample-
+  // accurate with zero phase discontinuity (verified: this was never the
+  // source of the audible issue — see the design history above).
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(36, "data");
+  view.setUint32(40, numSamples * 2, true);
+  const amplitude = 16384; // half-scale — plenty of headroom; volume does the real attenuating
+  for (let i = 0; i < numSamples; i++) {
+    const sample = Math.round(amplitude * Math.sin((2 * Math.PI * 220 * i) / sampleRate));
+    view.setInt16(44 + i * 2, sample, true);
   }
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return "data:audio/wav;base64," + btoa(binary);
 }
 
-function stopKeepAliveTone() {
-  if (!oscillator) return;
-  try {
-    oscillator.stop();
-  } catch {}
-  oscillator.disconnect();
-  gainNode.disconnect();
-  oscillator = null;
-  gainNode = null;
+let keepAliveEl = null;
+if (isNative()) {
+  keepAliveEl = new Audio(makeKeepAliveDataUri());
+  keepAliveEl.loop = true;
+  keepAliveEl.volume = 0.00004; // same ~-88dBFS that was confirmed inaudible before — see the comment above
 }
 
 let pauseGraceTimer = null;
@@ -82,9 +104,9 @@ export function setWantsToPlay(value) {
   }
   if (wantsToPlay === value) return;
   wantsToPlay = value;
-  if (!isNative()) return;
-  if (value) startKeepAliveTone();
-  else stopKeepAliveTone();
+  if (!keepAliveEl) return;
+  if (value) keepAliveEl.play().catch(() => {});
+  else keepAliveEl.pause();
 }
 
 // A plain user pause (in-app button, or the lock-screen/Bluetooth/car-stereo

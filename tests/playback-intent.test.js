@@ -16,28 +16,15 @@ const check = (name, ok, detail = "") => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Minimal native-platform stub: makes isNative() true so the module creates a
-// keep-alive tone via the Web Audio API, and records oscillator start()/stop()
-// calls on it (analogous to an <audio> element's play()/pause()).
+// keep-alive Audio element, and records play()/pause() calls on it.
 const audioCalls = [];
-class FakeAudioNode {
-  connect(dest) { return dest; }
-  disconnect() {}
+class FakeAudio {
+  play() { audioCalls.push("play"); return Promise.resolve(); }
+  pause() { audioCalls.push("pause"); }
 }
-class FakeOscillator extends FakeAudioNode {
-  constructor() { super(); this.frequency = { value: 0 }; }
-  start() { audioCalls.push("play"); }
-  stop() { audioCalls.push("pause"); }
-}
-class FakeGainNode extends FakeAudioNode {
-  constructor() { super(); this.gain = { value: 0 }; }
-}
-class FakeAudioContext {
-  constructor() { this.state = "running"; this.destination = new FakeAudioNode(); }
-  createOscillator() { return new FakeOscillator(); }
-  createGain() { return new FakeGainNode(); }
-  resume() { return Promise.resolve(); }
-}
-globalThis.window = { Capacitor: { isNativePlatform: () => true }, AudioContext: FakeAudioContext };
+globalThis.Audio = FakeAudio;
+globalThis.btoa = (s) => Buffer.from(s, "binary").toString("base64");
+globalThis.window = { Capacitor: { isNativePlatform: () => true } };
 
 (async () => {
   const mod = await import(pathToFileURL(path.join(ROOT, "js", "core", "playbackIntent.js")).href);
