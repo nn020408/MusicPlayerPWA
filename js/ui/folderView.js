@@ -99,7 +99,7 @@ async function openFolder(folderId, pushToStack, folderName) {
             setQueue(currentTracks, index);
             playCurrent();
           },
-          onMenu: () => openTrackActionsModal(track, { onDeleted: reloadCurrentFolder }),
+          onMenu: () => openTrackActionsModal(track, { onDeleted: () => removeTrackRowInstantly(track.id) }),
         })
       );
     });
@@ -129,6 +129,20 @@ export function openMainFolderView(stack) {
 export function reloadCurrentFolder() {
   const folder = currentFolder();
   if (folder) openFolder(folder.id, false);
+}
+
+// Drops one song's row right away after it's deleted — no network round trip,
+// so no spinner/blank-list flash. reloadCurrentFolder() was tried here first,
+// but clears the whole list and waits on a fresh Graph listing, which for a
+// single known removal is needless latency the user sees as the screen going
+// blank until it comes back. currentTracks itself is left untouched: a stale
+// entry in it only matters if "Shuffle"/"Play all" later queues this exact
+// song, and playback already knows what to do with a song OneDrive no longer
+// has (see the 404 handling in player.js) — it's skipped, not an error.
+function removeTrackRowInstantly(trackId) {
+  const row = Array.from(el.fileList.querySelectorAll(".track-row")).find((r) => r.dataset.trackId === trackId);
+  if (row) row.remove();
+  if (!el.fileList.children.length) el.statusMsg.textContent = "This folder is empty.";
 }
 
 // One level up in the main view (the Android back button). False when already at the top.
