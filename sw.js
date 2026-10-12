@@ -2,7 +2,7 @@
 // We deliberately do NOT cache audio or Graph API responses since this app
 // is streaming-only by design (no offline playback).
 
-const CACHE_NAME = "musicplayer-shell-v145";
+const CACHE_NAME = "musicplayer-shell-v146";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -25,6 +25,7 @@ const SHELL_FILES = [
   "./js/data/playlists.js",
   "./js/data/textMatch.js",
   "./js/main.js",
+  "./js/player/normalize.js",
   "./js/player/player.js",
   "./js/state/browse.js",
   "./js/ui/addToPlaylist.js",

@@ -69,7 +69,7 @@
     </header>
 
     <div id="breadcrumb" class="breadcrumb"></div>
-    <div id="pull-refresh" class="pull-refresh" aria-hidden="true"><span class="pull-refresh-icon">↻</span></div>
+    <div id="pull-refresh" class="pull-refresh" aria-hidden="true"><span class="pull-refresh-icon">↻</span><span class="pull-refresh-text">Refreshing…</span></div>
     <main id="file-list" class="file-list main-list">
       <p class="status-msg">Select your music folder to get started.</p>
     </main>
@@ -110,6 +110,11 @@
         <hr />
         <p class="settings-row">Theme</p>
         <div id="theme-list" class="file-list theme-list"></div>
+        <hr />
+        <label class="settings-row settings-toggle-row" for="volume-normalize-toggle">
+          <span>Volume normalization<br /><span class="settings-hint">Evens out quiet and loud songs.</span></span>
+          <input type="checkbox" id="volume-normalize-toggle" />
+        </label>
         <hr />
         <p class="settings-row">Backup your playlists and search index to a file — safe to do anytime, doesn't affect app speed.</p>
         <button id="backup-btn" class="secondary-btn">Backup to file</button>
