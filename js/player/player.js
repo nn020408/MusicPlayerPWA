@@ -5,6 +5,7 @@ import { pauseWithGrace, setWantsToPlay, wantsToPlay } from "../core/playbackInt
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
 import { forgetTrack, slimTrack } from "../data/library.js";
+import { updateCarMetadata, updateCarPlaybackState } from "./carMediaSession.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
 export const audioEl = new Audio();
@@ -335,6 +336,7 @@ export async function playCurrent() {
       // blob: URL into a Bitmap (only http/base64), so passing it would just
       // log a warning and no-op — title/artist/album still update fine.
       if (native) native.setMetadata({ title, artist, album, artwork: [] });
+      updateCarMetadata(title, artist, album, isFinite(audioEl.duration) ? audioEl.duration * 1000 : 0);
       player.onRealTags && player.onRealTags({ ...tags, pictureUrl });
     });
   } catch (err) {
@@ -671,6 +673,7 @@ function sessionHeartbeat() {
     const state = audioEl.paused ? "paused" : "playing";
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = state;
     nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: state });
+    updateCarPlaybackState(state === "playing", audioEl.currentTime * 1000);
     if (audioEl.paused && audioEl.duration && isFinite(audioEl.duration)) {
       sessionHeartbeatPauseJitterMs = sessionHeartbeatPauseJitterMs ? 0 : 1;
       const position = Math.min(audioEl.currentTime + sessionHeartbeatPauseJitterMs / 1000, audioEl.duration);
@@ -695,6 +698,7 @@ sessionHeartbeat();
 audioEl.addEventListener("play", () => {
   if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
   nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: "playing" });
+  updateCarPlaybackState(true, audioEl.currentTime * 1000);
   updatePositionState();
   player.onPlayStateChange && player.onPlayStateChange(true);
 });
@@ -706,6 +710,7 @@ audioEl.addEventListener("pause", () => {
   // plugin's default "only during playback" mode would; it only updates the
   // notification's play/pause icon.
   nativeMediaSession() && nativeMediaSession().setPlaybackState({ playbackState: "paused" });
+  updateCarPlaybackState(false, audioEl.currentTime * 1000);
   updatePositionState();
   player.onPlayStateChange && player.onPlayStateChange(false);
   savePlaybackState();
@@ -776,4 +781,5 @@ function updateMediaSessionMetadata(item) {
       if (details.seekTime != null) seekTo(details.seekTime);
     });
   }
+  updateCarMetadata(title, artist, album, isFinite(audioEl.duration) ? audioEl.duration * 1000 : 0);
 }

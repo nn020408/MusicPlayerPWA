@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Declares this app as a "media" app to Android Auto — required for the
+     car to even offer it in the app grid. See CarMediaBrowserService. -->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

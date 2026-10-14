@@ -7,6 +7,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <!-- Declares NubePlayer as a media app to Android Auto — see
+             CarMediaBrowserService and res/xml/automotive_app_desc.xml. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:name=".MainActivity"
@@ -39,6 +45,15 @@
             android:name=".IndexKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Lets Android Auto find and connect to NubePlayer — see CarMediaBrowserService. -->
+        <service
+            android:name=".CarMediaBrowserService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"
