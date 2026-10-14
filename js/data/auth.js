@@ -228,26 +228,40 @@ function nativeSignOut() {
   localStorage.removeItem(NATIVE_TOKEN_KEY);
 }
 
+// Shared by every concurrent caller so a burst of Graph requests near expiry
+// (the indexer, several prefetches, a folder listing all asking for a token
+// around the same moment) can't fire the refresh more than once — refresh
+// tokens are typically single-use/rotating, so a second request racing the
+// first with the same (about-to-be-invalidated) token can get rejected even
+// though the first one actually succeeded, forcing a spurious full sign-out.
+let refreshPromise = null;
+
 async function nativeGetAccessToken() {
   const tokens = getStoredNativeTokens();
   if (!tokens) throw new Error("Not signed in");
   if (tokens.expiresAt - 60000 > Date.now()) return tokens.accessToken;
 
-  try {
-    const data = await tokenEndpointRequest({
-      client_id: APP_CONFIG.clientId,
-      grant_type: "refresh_token",
-      refresh_token: tokens.refreshToken,
-      scope: APP_CONFIG.scopes.join(" "),
-    });
-    const fresh = tokensFromResponse(data);
-    if (!fresh.refreshToken) fresh.refreshToken = tokens.refreshToken; // refresh response may omit it, keep the one we have
-    storeNativeTokens(fresh);
-    return fresh.accessToken;
-  } catch (err) {
-    localStorage.removeItem(NATIVE_TOKEN_KEY);
-    throw new Error("Sign-in expired — please sign in again");
-  }
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      const data = await tokenEndpointRequest({
+        client_id: APP_CONFIG.clientId,
+        grant_type: "refresh_token",
+        refresh_token: tokens.refreshToken,
+        scope: APP_CONFIG.scopes.join(" "),
+      });
+      const fresh = tokensFromResponse(data);
+      if (!fresh.refreshToken) fresh.refreshToken = tokens.refreshToken; // refresh response may omit it, keep the one we have
+      storeNativeTokens(fresh);
+      return fresh.accessToken;
+    } catch (err) {
+      localStorage.removeItem(NATIVE_TOKEN_KEY);
+      throw new Error("Sign-in expired — please sign in again");
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+  return refreshPromise;
 }
 
 // ---------- Public API — picks a side, used by the UI and graph.js ----------
