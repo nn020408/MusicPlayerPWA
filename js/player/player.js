@@ -128,7 +128,25 @@ function prefetchNextTrackBlob(item) {
   prefetchDownloadUrl(item)
     .then((url) => {
       if (!url || controller.signal.aborted) return null;
-      return fetch(url, { signal: controller.signal }).then((res) => (res.ok ? res.blob() : null));
+      return fetch(url, { signal: controller.signal }).then((res) => {
+        if (!res.ok) return null;
+        const expectedLength = Number(res.headers.get("content-length"));
+        return res.blob().then((blob) => {
+          // A dropped/flaky connection can end the response stream early
+          // without fetch() itself reporting an error — res.blob() just
+          // resolves with whatever bytes it got. That's a silently truncated
+          // file, which only ever shows up later as "decode error
+          // (unsupported format?)" right at the track transition, with
+          // nothing to connect it back to a network problem. Checking the
+          // downloaded size against what the server said to expect catches
+          // it here instead of trusting it — a mismatch falls back to the
+          // normal streaming URL (the native <audio> element's own HTTP
+          // layer, which retries/resumes far more robustly than one fetch()
+          // call), same as if this prefetch had failed outright.
+          if (expectedLength && blob.size !== expectedLength) return null;
+          return blob;
+        });
+      });
     })
     .then((blob) => {
       if (blob && !controller.signal.aborted) {

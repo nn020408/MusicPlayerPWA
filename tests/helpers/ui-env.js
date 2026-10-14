@@ -32,6 +32,11 @@ const GONE = new Set();
 // sent a (successful) DELETE, in order, so a test can assert on it.
 const FAIL_DELETE = new Set();
 const DELETED = [];
+// song ids whose full-file fetch (player.js's next-track blob prefetch)
+// reports a Content-Length bigger than what it actually delivers — simulates
+// a connection dropping mid-download, which fetch() can resolve from as if
+// nothing went wrong.
+const TRUNCATE_PREFETCH = new Set();
 
 function graphResponse(url) {
   const m = /\/me\/drive\/(?:root|items\/([^/?]+))(?:\/children)?/.exec(url);
@@ -47,7 +52,11 @@ function graphResponse(url) {
       ],
     };
   }
-  const item = /\/me\/drive\/items\/([^/?]+)/.exec(url);
+  // Captures everything up to a "?" (not just up to the first "/") — song
+  // ids in this fixture are "folderId/filename", so stopping at the first
+  // "/" silently collapsed every single-item lookup down to just the
+  // folder id, losing which song it was actually for.
+  const item = /\/me\/drive\/items\/([^?]+)/.exec(url);
   if (item) return { id: item[1], "@microsoft.graph.downloadUrl": "https://files.test/" + encodeURIComponent(item[1]) };
   return {};
 }
@@ -119,6 +128,17 @@ async function startApp({ returning = true } = {}) {
   define("Audio", Audio);
   window.Audio = Audio;
   define("MediaMetadata", function MediaMetadata() {});
+  // Node's own global URL (jsdom's isn't used here — "URL" isn't in the
+  // window-property copy list above) has no Blob URL registry at all, so
+  // player.js's URL.createObjectURL()/revokeObjectURL() calls (next-track
+  // and artwork blob prefetching) would otherwise throw and get silently
+  // swallowed, masking whatever uses them from ever being exercised here.
+  class FakeURL extends URL {}
+  let blobUrlCounter = 0;
+  FakeURL.createObjectURL = () => `blob:test://${++blobUrlCounter}`;
+  FakeURL.revokeObjectURL = () => {};
+  define("URL", FakeURL);
+  window.URL = FakeURL;
   // reading real tags always "fails" here, so the app falls back to the file names
   define("jsmediatags", { read: (url, cb) => cb.onError({ type: "test" }), Reader: class { setTagsToRead() { return this; } read(cb) { cb.onError({ type: "test" }); } } });
   define("confirm", () => true);
@@ -143,7 +163,17 @@ async function startApp({ returning = true } = {}) {
       return { ok: true, status: 204, json: async () => ({}), text: async () => "" };
     }
     if (itemId && GONE.has(itemId)) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
-    if (u.startsWith("https://files.test/")) return { ok: true, status: 206, headers: { get: () => null }, body: null, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    if (u.startsWith("https://files.test/")) {
+      const fileId = decodeURIComponent(u.slice("https://files.test/".length));
+      const realBytes = 1000; // arbitrary fake body — only its size matters to anything that checks
+      const reportedLength = TRUNCATE_PREFETCH.has(fileId) ? realBytes * 2 : realBytes;
+      return {
+        ok: true, status: 206,
+        headers: { get: (h) => (String(h).toLowerCase() === "content-length" ? String(reportedLength) : null) },
+        body: null, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0),
+        blob: async () => new window.Blob([new Uint8Array(realBytes)]),
+      };
+    }
     return { ok: true, status: 200, json: async () => graphResponse(u), text: async () => "" };
   });
   process.on("unhandledRejection", () => {});
@@ -163,4 +193,4 @@ async function startApp({ returning = true } = {}) {
   };
 }
 
-module.exports = { startApp, savedLibrary, TREE, GONE, FAIL_DELETE, DELETED };
+module.exports = { startApp, savedLibrary, TREE, GONE, FAIL_DELETE, DELETED, TRUNCATE_PREFETCH };
