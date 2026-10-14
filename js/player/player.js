@@ -101,16 +101,21 @@ function prefetchDownloadUrl(item) {
 const prefetchedBlobUrls = new Map(); // itemId -> object URL (already downloaded, not yet consumed)
 let blobPrefetch = null; // { itemId, controller } for the in-flight download, if any
 
-function revokeStaleBlobPrefetches(exceptItemId) {
+// keepItemId: a second id to spare — playCurrent() calls this to start
+// prefetching the NEXT track's blob while it's still reading the CURRENT
+// track's own already-prefetched blob out of this same map. Without it, that
+// current-track entry was wiped by this cleanup before ever being read,
+// silently making the whole "download ahead of time" optimization a no-op.
+function revokeStaleBlobPrefetches(exceptItemId, keepItemId) {
   for (const [id, url] of prefetchedBlobUrls) {
-    if (id !== exceptItemId) {
+    if (id !== exceptItemId && id !== keepItemId) {
       URL.revokeObjectURL(url);
       prefetchedBlobUrls.delete(id);
     }
   }
 }
 
-function prefetchNextTrackBlob(item) {
+function prefetchNextTrackBlob(item, keepItemId) {
   if (!item || prefetchedBlobUrls.has(item.id)) return;
   if (blobPrefetch && blobPrefetch.itemId === item.id) return;
   // Respect an explicit data-saver signal — this trades bandwidth for
@@ -118,7 +123,7 @@ function prefetchNextTrackBlob(item) {
   // saving data. (Network Information API isn't universal; feature-detect.)
   if (navigator.connection && navigator.connection.saveData) return;
 
-  revokeStaleBlobPrefetches(item.id);
+  revokeStaleBlobPrefetches(item.id, keepItemId);
   if (blobPrefetch) blobPrefetch.controller.abort();
 
   const controller = new AbortController();
@@ -128,32 +133,38 @@ function prefetchNextTrackBlob(item) {
   prefetchDownloadUrl(item)
     .then((url) => {
       if (!url || controller.signal.aborted) return null;
-      return fetch(url, { signal: controller.signal }).then((res) => {
-        if (!res.ok) return null;
-        const expectedLength = Number(res.headers.get("content-length"));
-        return res.blob().then((blob) => {
+      // Retried up to 3 times — a dropped connection mid-download is exactly
+      // the kind of transient failure this guards against (see the
+      // Content-Length check below). If every attempt fails, the outer
+      // .catch() below lets this prefetch quietly give up — playCurrent()'s
+      // own, more patient 8-attempt retry still handles it once this song's
+      // turn actually comes, just without the "already downloaded" head start.
+      return retryWithBackoff(
+        async () => {
+          const res = await fetch(url, { signal: controller.signal });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const expectedLength = Number(res.headers.get("content-length"));
+          const blob = await res.blob();
           // A dropped/flaky connection can end the response stream early
           // without fetch() itself reporting an error — res.blob() just
           // resolves with whatever bytes it got. That's a silently truncated
-          // file, which only ever shows up later as "decode error
+          // file, which only ever showed up later as "decode error
           // (unsupported format?)" right at the track transition, with
           // nothing to connect it back to a network problem. Checking the
           // downloaded size against what the server said to expect catches
-          // it here instead of trusting it — a mismatch falls back to the
-          // normal streaming URL (the native <audio> element's own HTTP
-          // layer, which retries/resumes far more robustly than one fetch()
-          // call), same as if this prefetch had failed outright.
-          if (expectedLength && blob.size !== expectedLength) return null;
+          // it here instead of trusting it.
+          if (expectedLength && blob.size !== expectedLength) throw new Error("truncated download");
           return blob;
-        });
-      });
+        },
+        { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 4000, shouldRetry: () => !controller.signal.aborted }
+      );
     })
     .then((blob) => {
       if (blob && !controller.signal.aborted) {
         prefetchedBlobUrls.set(item.id, URL.createObjectURL(blob));
       }
     })
-    .catch(() => {}) // aborted or network failure — falls back to streaming the URL like before
+    .catch(() => {}) // aborted, or every retry failed — falls back to streaming the URL like before
     .finally(() => {
       if (blobPrefetch === entry) blobPrefetch = null;
     });
@@ -322,7 +333,7 @@ export async function playCurrent() {
     if (nextItem) {
       getThumbnailUrl(nextItem.id); // pre-warm cache so skipping feels instant
       prefetchDownloadUrl(nextItem); // see comment above prefetchedUrls — keeps auto-advance working screen-off
-      prefetchNextTrackBlob(nextItem); // see comment above prefetchedBlobUrls — same goal, stronger guarantee
+      prefetchNextTrackBlob(nextItem, item.id); // see comment above prefetchedBlobUrls — same goal, stronger guarantee; item.id spares THIS track's own already-prefetched blob, about to be read just below
     }
   }
 

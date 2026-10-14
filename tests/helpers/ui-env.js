@@ -35,8 +35,12 @@ const DELETED = [];
 // song ids whose full-file fetch (player.js's next-track blob prefetch)
 // reports a Content-Length bigger than what it actually delivers — simulates
 // a connection dropping mid-download, which fetch() can resolve from as if
-// nothing went wrong.
+// nothing went wrong. Truncated on every attempt.
 const TRUNCATE_PREFETCH = new Set();
+// Like TRUNCATE_PREFETCH, but only for the next N attempts (then succeeds) —
+// simulates a transient drop the retry should actually recover from, not
+// just gracefully give up on.
+const TRUNCATE_PREFETCH_COUNT = new Map();
 
 function graphResponse(url) {
   const m = /\/me\/drive\/(?:root|items\/([^/?]+))(?:\/children)?/.exec(url);
@@ -166,7 +170,9 @@ async function startApp({ returning = true } = {}) {
     if (u.startsWith("https://files.test/")) {
       const fileId = decodeURIComponent(u.slice("https://files.test/".length));
       const realBytes = 1000; // arbitrary fake body — only its size matters to anything that checks
-      const reportedLength = TRUNCATE_PREFETCH.has(fileId) ? realBytes * 2 : realBytes;
+      const remainingCount = TRUNCATE_PREFETCH_COUNT.get(fileId) || 0;
+      if (remainingCount > 0) TRUNCATE_PREFETCH_COUNT.set(fileId, remainingCount - 1);
+      const reportedLength = TRUNCATE_PREFETCH.has(fileId) || remainingCount > 0 ? realBytes * 2 : realBytes;
       return {
         ok: true, status: 206,
         headers: { get: (h) => (String(h).toLowerCase() === "content-length" ? String(reportedLength) : null) },
@@ -193,4 +199,4 @@ async function startApp({ returning = true } = {}) {
   };
 }
 
-module.exports = { startApp, savedLibrary, TREE, GONE, FAIL_DELETE, DELETED, TRUNCATE_PREFETCH };
+module.exports = { startApp, savedLibrary, TREE, GONE, FAIL_DELETE, DELETED, TRUNCATE_PREFETCH, TRUNCATE_PREFETCH_COUNT };
