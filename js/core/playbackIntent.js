@@ -47,6 +47,24 @@ export let wantsToPlay = false;
 // audioEl.volume that was too loud, not the loop itself. Generated at full
 // amplitude; volume (below) does the attenuating, the same plain property
 // any in-app volume slider would use.
+//
+// A third bug, found after dropping to 0.00004: that volume is too quiet for
+// Chromium's own freeze exemption to recognize as "playing audio" at all.
+// Confirmed on-device by injecting test tones at several volumes while
+// paused+backgrounded+locked for 5+ minutes each and probing with
+// Runtime.evaluate over CDP (no app-visible UI involved): 0.00004 and even
+// 0.0004 both still froze solid (the probe hung until the app was
+// foregrounded again — the WebView's JS, including this file's own
+// setTimeout calls, genuinely stops executing, it's not merely throttled);
+// 0.002 and above stayed fully responsive and a real KEYCODE_MEDIA_PLAY_PAUSE
+// resumed correctly without ever opening the app. The exemption appears to
+// depend on measured loudness specifically (not just "is a media element
+// technically playing") — a second test holding volume at 1.0 but baking the
+// same tiny amplitude straight into the PCM samples still froze, so there's
+// no trick that satisfies the check while staying silent. 0.002 is almost
+// exactly the original pre-(1)/(2) 0.0018 volume, so this isn't new loudness
+// being introduced — it's the quietest level with direct on-device evidence
+// of actually working.
 function makeKeepAliveDataUri() {
   const sampleRate = 8000;
   const numSamples = sampleRate; // 1 second, looped — 220 cycles of a 220Hz
@@ -86,7 +104,7 @@ let keepAliveEl = null;
 if (isNative()) {
   keepAliveEl = new Audio(makeKeepAliveDataUri());
   keepAliveEl.loop = true;
-  keepAliveEl.volume = 0.00004; // same ~-88dBFS that was confirmed inaudible before — see the comment above
+  keepAliveEl.volume = 0.002; // quietest level confirmed on-device to actually keep the freeze exemption — see the comment above
 }
 
 let pauseGraceTimer = null;
