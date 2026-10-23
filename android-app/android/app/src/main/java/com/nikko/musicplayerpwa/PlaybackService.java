@@ -12,6 +12,8 @@ import android.support.v4.media.session.PlaybackStateCompat;
 
 import androidx.core.app.NotificationCompat;
 import androidx.media.session.MediaButtonReceiver;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
@@ -43,7 +45,32 @@ public class PlaybackService extends MediaSessionService {
     public void onCreate() {
         super.onCreate();
         instance = this;
-        player = new ExoPlayer.Builder(this).build();
+        player = new ExoPlayer.Builder(this)
+                // Explicit rather than relying on ExoPlayer's own defaults —
+                // USAGE_MEDIA/CONTENT_TYPE_MUSIC (not the unknown/movie-ish
+                // default) is what correctly identifies this to Android as
+                // music specifically, and setAudioAttributes's second
+                // argument turns on ExoPlayer's own automatic audio-focus
+                // handling: duck/pause when another app (turn-by-turn
+                // directions, a phone call, another media app) needs focus,
+                // and resume when it's given back. Reported as "the app
+                // always plays on top of other apps' audio" — which this
+                // addresses directly, on top of also no longer running the
+                // WebView keep-alive tone concurrently (see js/core/
+                // playbackIntent.js), itself a second, independent audio
+                // focus request fighting over the same thing.
+                .setAudioAttributes(
+                        new AudioAttributes.Builder()
+                                .setUsage(C.USAGE_MEDIA)
+                                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                                .build(),
+                        /* handleAudioFocus= */ true
+                )
+                // Pauses automatically on ACTION_AUDIO_BECOMING_NOISY (e.g. a
+                // Bluetooth disconnect) instead of suddenly blasting through
+                // the phone's own speaker.
+                .setHandleAudioBecomingNoisy(true)
+                .build();
         // The session is given a QueueAwarePlayer wrapper, not the raw
         // ExoPlayer directly, so hardware/notification Next/Previous
         // actually reach JS's real queue instead of silently no-op'ing

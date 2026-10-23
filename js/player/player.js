@@ -312,6 +312,15 @@ export async function playCurrent() {
         if (!isStillCurrent()) return;
         if (!url) throw new Error("No download URL returned by OneDrive for this file");
 
+        // Native engine only — load() builds its MediaItem (and whatever it
+        // hands the Bluetooth/car display) from whatever metadata is given
+        // right then, not from a later correction — reported as the car's
+        // display showing no title/artist/duration at all. Giving it the
+        // same filename/item.audio-derived guess updateMediaSessionMetadata()
+        // uses means AVRCP has something correct from the very first
+        // moment, with the real ID3 tags (if any) upgrading it moments
+        // later via setNowPlayingMetadata() exactly as before.
+        if (audioEl.setPendingMetadata) audioEl.setPendingMetadata(basicMetadataFor(item));
         audioEl.src = url;
         // Safe to revoke now — audioEl.src was reassigned above, so nothing
         // still references the previous blob (if any).
@@ -826,10 +835,19 @@ document.addEventListener("visibilitychange", () => {
 // away," so having both covers more of that surface than either alone.
 window.addEventListener("pagehide", () => savePlaybackState());
 
+// Shared by updateMediaSessionMetadata() below and the native load() path in
+// playCurrent() — the filename/item.audio-derived guess, before the real
+// embedded ID3 tags (if any) resolve.
+function basicMetadataFor(item) {
+  return {
+    title: item.name.replace(/\.[^/.]+$/, ""),
+    artist: (item.audio && item.audio.artist) || "OneDrive",
+    album: (item.audio && item.audio.album) || "",
+  };
+}
+
 function updateMediaSessionMetadata(item) {
-  const title = item.name.replace(/\.[^/.]+$/, "");
-  const artist = (item.audio && item.audio.artist) || "OneDrive";
-  const album = (item.audio && item.audio.album) || "";
+  const { title, artist, album } = basicMetadataFor(item);
 
   // Native engine only — not part of the real <audio> element's own
   // surface. load()/play() don't know the track's title/artist/album (they

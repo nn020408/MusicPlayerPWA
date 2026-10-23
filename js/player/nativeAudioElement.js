@@ -28,15 +28,14 @@ export class NativeAudioElement extends EventTarget {
     this._duration = NaN;
     this._paused = true;
     this._error = null;
+    this._pendingMetadata = { title: "", artist: "", album: "" };
     this.preload = "auto"; // unused, kept only for API parity with <audio>
     this.playbackRate = 1;
 
     plugin.addListener("playbackState", ({ playing, positionMs, durationMs }) => {
-      const wasPaused = this._paused;
-      this._paused = !playing;
       if (positionMs != null) this._currentTime = positionMs / 1000;
       if (durationMs != null && isFinite(durationMs) && durationMs > 0) this._duration = durationMs / 1000;
-      if (wasPaused !== this._paused) this.dispatchEvent(new Event(this._paused ? "pause" : "play"));
+      this._setPaused(!playing);
     });
     plugin.addListener("positionUpdate", ({ positionMs, durationMs }) => {
       if (positionMs != null) this._currentTime = positionMs / 1000;
@@ -44,7 +43,12 @@ export class NativeAudioElement extends EventTarget {
       this.dispatchEvent(new Event("timeupdate"));
     });
     plugin.addListener("trackEnded", () => {
-      this._paused = true;
+      // A real <audio> element fires "pause" right before "ended" (per
+      // spec) — matched here too, not just for fidelity: if there's no next
+      // track to auto-advance to (end of queue, repeat off), nothing else
+      // would ever correct a merely-assigned _paused, leaving the play/
+      // pause icon stuck showing "playing" permanently.
+      this._setPaused(true);
       this.dispatchEvent(new Event("ended"));
     });
     plugin.addListener("error", ({ message }) => {
@@ -110,25 +114,48 @@ export class NativeAudioElement extends EventTarget {
   play() {
     const url = this._pendingLoad;
     this._pendingLoad = null;
-    // Real title/artist/album aren't known yet at this point in player.js's
-    // call order (updateMediaSessionMetadata() only runs after play()
-    // resolves) — setNowPlayingMetadata() below corrects this moments later,
-    // via the plugin's setMetadata(), without needing to restart playback.
+    // setPendingMetadata() (called by playCurrent() right before .src=) is
+    // the filename/item.audio-derived guess, not yet the real ID3 tags —
+    // given to load() directly rather than left blank, so the Bluetooth/car
+    // display has a real title+artist from the very first moment instead
+    // of showing nothing until setNowPlayingMetadata() corrects it moments
+    // later (reported as the car's display saying no info at all).
     // resumePositionMs carries over whatever currentTime was set to since
     // .src was assigned (see the currentTime setter above) — 0 for a fresh
     // track, or a real resume position for a restored/reconnecting one.
+    const { title, artist, album } = this._pendingMetadata;
     const request = url
-      ? this._plugin.load({ url, title: "", artist: "", album: "", resumePositionMs: Math.round(this._currentTime * 1000) })
+      ? this._plugin.load({ url, title, artist, album, resumePositionMs: Math.round(this._currentTime * 1000) })
       : this._plugin.play();
     return request.then(() => {
-      this._paused = false;
+      this._setPaused(false);
       this._error = null;
     });
   }
 
   pause() {
     this._plugin.pause();
-    this._paused = true;
+    this._setPaused(true);
+  }
+
+  // Both play() and pause() above update _paused (and dispatch "play"/
+  // "pause") synchronously and optimistically, rather than waiting for the
+  // native plugin's own "playbackState" event to confirm it — that event
+  // still arrives moments later and still drives the same transition for
+  // anything NOT triggered by a direct call here (audio focus loss ducking
+  // the player, Bluetooth-button presses, etc. — see the constructor's
+  // "playbackState" listener), but by the time it does, _paused here
+  // already matches, so its own wasPaused !== this._paused check correctly
+  // no-ops rather than firing twice. Confirmed on-device as a real bug
+  // without this: pause() setting _paused synchronously but relying SOLELY
+  // on that later listener to dispatch "pause" meant the listener's own
+  // "did anything change" check always saw no change by the time it ran —
+  // the event never fired at all, and the in-app play/pause button's icon
+  // never updated away from "pause" no matter how many times you tapped it.
+  _setPaused(paused) {
+    const wasPaused = this._paused;
+    this._paused = paused;
+    if (wasPaused !== paused) this.dispatchEvent(new Event(paused ? "pause" : "play"));
   }
 
   // Not part of the <audio> element surface — player.js's resetPlayer()
@@ -168,5 +195,12 @@ export class NativeAudioElement extends EventTarget {
   // playback or lose position.
   setNowPlayingMetadata({ title, artist, album }) {
     this._plugin.setMetadata({ title, artist, album });
+  }
+
+  // Not part of the <audio> element surface — called right before .src= so
+  // the upcoming load() carries real metadata from the start. See play()
+  // above.
+  setPendingMetadata({ title, artist, album }) {
+    this._pendingMetadata = { title, artist, album };
   }
 }
