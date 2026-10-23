@@ -409,6 +409,15 @@ export async function playCurrent() {
       if (isStillCurrent()) playNext();
       return;
     }
+    // A newer playCurrent() already took over (e.g. the native engine's own
+    // load()/play() rejecting an old, now-irrelevant attempt with "Superseded
+    // by a newer load/play call" — see NativePlayerPlugin.java) — nothing
+    // here is wrong, there's just nothing left to log, show, or retry for an
+    // attempt nobody's waiting on anymore. Confirmed on-device: without this
+    // check, every rapid skip logged a spurious "Playback failed" and could
+    // still kick off a pointless retry-with-backoff cycle for a request that
+    // was already obsolete the moment it failed.
+    if (!isStillCurrent()) return;
     console.error("Playback failed", err);
     const isAutoplayBlock = err && err.name === "NotAllowedError";
     const detail = isAutoplayBlock ? "browser blocked autoplay — tap play again" : (err && err.message) || String(err);
