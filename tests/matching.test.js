@@ -99,5 +99,23 @@ const json = (body) => ({ ok: true, status: 200, json: async () => body });
   const none = await getLyricsForTrack(track("t5", "Offline.mp3", "Nobody"), sources(null));
   check("lyrics: offline just means no lyrics, not an error", none.plain === null && none.synced === null && none.instrumental === false);
 
+  // A different edit/recording (same title+artist, way-off duration) must not
+  // be trusted just because /api/get returned *something* — this is exactly
+  // what produces "lyrics slowly drift out of sync" reports (a different
+  // intro length baked in as a constant offset across every line). The fuzzy
+  // search strategy below it has a correctly-timed candidate; rejecting the
+  // mismatched /api/get hit is what lets the cascade reach it.
+  requests.length = 0;
+  routes = [
+    [(u) => u.startsWith("https://lrclib.net/api/get"), () => json({ trackName: "Enter Sandman", artistName: "Metallica", duration: 60, syncedLyrics: "[00:05.00] Wrong recording line" })],
+    [(u) => u.startsWith("https://lrclib.net/api/search"), () => json([{ trackName: "Enter Sandman", artistName: "Metallica", duration: 212, syncedLyrics: "[00:05.00] Correct recording line" }])],
+  ];
+  const mismatched = await getLyricsForTrack(track("t6", "Enter Sandman.mp3", "Metallica"), sources({ title: "Enter Sandman", artist: "Metallica" }, 210));
+  check(
+    "lyrics: a way-off-duration /api/get hit is rejected in favor of a correctly-timed search result",
+    mismatched.synced && mismatched.synced[0].text === "Correct recording line",
+    JSON.stringify(mismatched.synced)
+  );
+
   process.exit(bad ? 1 : 0);
 })().catch((e) => { console.log("FAIL matching test crashed: " + (e && e.stack || e)); process.exit(1); });

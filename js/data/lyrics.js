@@ -40,16 +40,32 @@ function parseSyncedLyrics(lrc) {
 // Scores each candidate against what we actually asked for and only accepts
 // the best one if it clears a minimum bar, rather than always showing
 // *something*.
+// A different edit/recording of the same title+artist (a different intro
+// length, a remix, a radio edit vs. the album version) is exactly what
+// produces the "lyrics slowly drift out of sync over the song" reports —
+// each line's relative timing is internally correct, but the whole file is
+// offset by however much longer/shorter that recording's intro is. Unlike a
+// wrong-song match, title+artist both still look right, so duration is the
+// only signal that can catch this at all. Hard-rejecting a large mismatch
+// (rather than just under-scoring it) matters because title+artist alone can
+// otherwise still clear LYRICS_MATCH_THRESHOLD even with a badly wrong
+// duration — see isDurationMismatch below, used both here and as a direct
+// sanity check on the non-scored lookup strategies.
+function isDurationMismatch(durationA, durationB) {
+  return durationA && durationB && Math.abs(durationA - durationB) > 20;
+}
+
 function scoreLyricsCandidate(candidate, wantTitle, wantArtist, wantDuration) {
+  if (isDurationMismatch(wantDuration, candidate.duration)) return -Infinity;
   let score = 0;
   score += fieldMatchScore(wantTitle, candidate.trackName, 3, 1.5);
   score += fieldMatchScore(wantArtist, candidate.artistName, 3, 1.5);
 
   if (wantDuration && candidate.duration) {
     const diff = Math.abs(candidate.duration - wantDuration);
-    if (diff <= 2) score += 2;
-    else if (diff <= 6) score += 1;
-    else if (diff > 20) score -= 2; // almost certainly a different recording
+    if (diff <= 6) score += 2; // a few seconds off — same tolerance intent as strategy 2's own comment
+    else if (diff <= 12) score -= 1;
+    else score -= 3; // 12-20s: likely a different edit, but not quite the hard cutoff above
   }
   return score;
 }
@@ -147,21 +163,31 @@ async function fetchLyricsResult(track, sources) {
 
   let hit = null;
 
-  // 1) Exact match on the cleaned title — most precise when it works.
+  // 1) Exact match on the cleaned title — most precise when it works. Still
+  // double-checked against our own duration below: LRCLIB's own duration
+  // param may be tolerant server-side in ways we can't see, and a wrong
+  // recording slipping through here would otherwise be trusted completely
+  // unscored.
   for (const candidate of artistCandidates) {
     if (hit) break;
     const params = new URLSearchParams({ track_name: cleanTitle, artist_name: candidate });
     if (album) params.set("album_name", album);
     if (duration) params.set("duration", String(duration));
-    hit = await lrclibGet(params);
+    const result = await lrclibGet(params);
+    if (result && !isDurationMismatch(duration, result.duration)) hit = result;
   }
   // 2) Same, but without duration — covers a different reference recording
-  //    (radio edit vs. album version) being a few seconds off.
+  //    (radio edit vs. album version) being a few seconds off. Explicitly
+  //    checked here (not just scored) since this strategy has no candidate
+  //    list to score at all, just whatever LRCLIB hands back for the bare
+  //    title+artist — the one path most likely to return a different
+  //    edit/remix with a materially different intro length.
   for (const candidate of artistCandidates) {
     if (hit || !duration) break;
     const params = new URLSearchParams({ track_name: cleanTitle, artist_name: candidate });
     if (album) params.set("album_name", album);
-    hit = await lrclibGet(params);
+    const result = await lrclibGet(params);
+    if (result && !isDurationMismatch(duration, result.duration)) hit = result;
   }
   // 3) Fuzzy search, scored — try each title and artist candidate until one
   //    clears the confidence bar, instead of trusting whichever result LRCLIB
