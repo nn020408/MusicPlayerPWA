@@ -4,7 +4,7 @@
 import { pauseWithGrace, setWantsToPlay, wantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
-import { forgetTrack, slimTrack } from "../data/library.js";
+import { forgetTrack, libraryTracks, slimTrack } from "../data/library.js";
 import { updateCarMetadata, updateCarPlaybackState } from "./carMediaSession.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
@@ -197,6 +197,19 @@ export function cycleRepeat() {
 export async function playCurrent() {
   const item = currentTrack();
   if (!item) return;
+  // The queue holds its own copy of each track (see slimTrack/savePlaybackState
+  // below), frozen at whatever moment it was last saved -- often before the
+  // background indexer or the PC-made artists file had gotten to that song. A
+  // session that mostly skips within one already-restored queue (rather than
+  // re-opening a folder view, which pulls fresh objects from libraryTracks)
+  // would otherwise keep showing that stale "no artist yet" snapshot forever,
+  // never seeing the real tag even after it's long since been read. Patching
+  // it onto the queue's own object here means it also gets saved correctly
+  // next time, instead of only fixing the display this one time.
+  if (!item.audio || !item.audio.artist) {
+    const live = libraryTracks.find((t) => t.id === item.id);
+    if (live && live.audio && live.audio.artist) item.audio = live.audio;
+  }
   setWantsToPlay(true);
   const myGeneration = ++playGeneration;
   const isStillCurrent = () => playGeneration === myGeneration;

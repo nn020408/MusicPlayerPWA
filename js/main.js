@@ -7,9 +7,9 @@ import { APP_VERSION } from "./core/config.js";
 import { el } from "./core/dom.js";
 import { getActiveAccount, initAuth, signIn, signOut } from "./data/auth.js";
 import { clearFolderListCache } from "./data/graph.js";
-import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY } from "./data/library.js";
+import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, libraryTracks } from "./data/library.js";
 import { ensureFavoritesPlaylist } from "./data/playlists.js";
-import { player, repeatMode, resetPlayer, restorePlaybackState, shuffleOn } from "./player/player.js";
+import { audioEl, player, repeatMode, resetPlayer, restorePlaybackState, shuffleOn } from "./player/player.js";
 import { paintFallbackArt } from "./ui/fallbackArt.js";
 import { ensureLibraryLoaded, markLibraryStale } from "./ui/libraryWork.js";
 import { openMainFolderView } from "./ui/folderView.js";
@@ -72,7 +72,25 @@ function showApp() {
     }
   } else {
     openMainFolderView(savedPath);
-    ensureLibraryLoaded(); // quietly builds/refreshes the search index in the background — no need to open Search first
+    // quietly builds/refreshes the search index in the background — no need
+    // to open Search first. Also, if restoredItem's own stale queue snapshot
+    // (see playCurrent() in player.js) was missing its artist, the library
+    // cache this loads usually already has it — patch the still-unplayed
+    // restored display's artist text once that's in, instead of leaving
+    // "OneDrive" showing until the user actually presses play. Guarded on
+    // playback not having started yet (audioEl still paused): once it has,
+    // playCurrent()'s own fix has already taken care of it, and rewriting
+    // the display here could race a button/art update already in progress.
+    ensureLibraryLoaded().then(() => {
+      if (restoredItem && audioEl.paused && (!restoredItem.audio || !restoredItem.audio.artist)) {
+        const live = libraryTracks.find((t) => t.id === restoredItem.id);
+        if (live && live.audio && live.audio.artist) {
+          restoredItem.audio = live.audio;
+          el.nowPlayingArtist.textContent = live.audio.artist;
+          el.fullArtist.textContent = live.audio.artist;
+        }
+      }
+    });
   }
 }
 
