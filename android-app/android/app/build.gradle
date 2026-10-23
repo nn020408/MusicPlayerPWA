@@ -45,6 +45,14 @@ dependencies {
     // MediaSessionCompat/MediaBrowserServiceCompat classes even though the
     // vendored plugin already uses the exact same library elsewhere.
     implementation "androidx.media:media:1.6.0"
+    // Native playback engine (PlaybackService/NativePlayerPlugin) -- see
+    // feature/native-playback. Removed @jofr/capacitor-media-session and
+    // CarMediaBrowserService's hand-rolled MediaSessionCompat/Media
+    // BrowserServiceCompat once this is proven out, in favor of Media3's
+    // MediaSessionService which covers both the phone session and Android Auto.
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-session:$media3Version"
+    implementation "androidx.media3:media3-common:$media3Version"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

@@ -22,6 +22,7 @@ public class MainActivity extends BridgeActivity {
         // Must be registered before super.onCreate builds the bridge.
         registerPlugin(IndexKeepAlivePlugin.class);
         registerPlugin(CarMediaSessionPlugin.class);
+        registerPlugin(NativePlayerPlugin.class); // feature/native-playback skeleton — see PlaybackService
         super.onCreate(savedInstanceState);
 
         // Required on Android 13+ to actually display the persistent playback

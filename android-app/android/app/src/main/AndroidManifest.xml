@@ -55,6 +55,20 @@
             </intent-filter>
         </service>
 
+        <!-- Native playback engine (feature/native-playback) — real ExoPlayer
+             decode/output in a genuine foreground service, so controlling an
+             already-loaded track doesn't depend on the WebView's JS staying
+             unfrozen. Not yet wired as the app's only media session — see
+             PlaybackService/NativePlayerPlugin. -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
