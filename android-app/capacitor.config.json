@@ -1,10 +1,5 @@
 {
   "appId": "com.nikko.musicplayerpwa",
   "appName": "NubePlayer",
-  "webDir": "www",
-  "plugins": {
-    "MediaSession": {
-      "foregroundService": "always"
-    }
-  }
+  "webDir": "www"
 }
