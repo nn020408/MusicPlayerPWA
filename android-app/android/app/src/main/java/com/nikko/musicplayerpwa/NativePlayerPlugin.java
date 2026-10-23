@@ -28,6 +28,12 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 public class NativePlayerPlugin extends Plugin {
     private static final long POSITION_TICK_MS = 500;
 
+    // Lets QueueAwarePlayer (owned by PlaybackService, a separate Android
+    // component with no direct reference to this plugin instance) reach back
+    // into JS via notifyRemoteAction() below -- the reverse direction of
+    // PlaybackService.getInstance().
+    private static NativePlayerPlugin instance;
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private Player.Listener playerListener;
     // Which ExoPlayer instance playerListener is currently attached to --
@@ -48,6 +54,26 @@ public class NativePlayerPlugin extends Plugin {
     // "loaded" by resumePlayback()'s fast path. See player.js's comment on
     // loadedTrackId for the bug this guards against.
     private PluginCall pendingStartCall;
+
+    @Override
+    public void load() {
+        instance = this;
+    }
+
+    public static NativePlayerPlugin getInstance() {
+        return instance;
+    }
+
+    // Called by QueueAwarePlayer (a different Android component, owned by
+    // PlaybackService) when a hardware/Bluetooth/notification-tap Next or
+    // Previous press comes in -- forwarded to JS's real, queue-aware
+    // playNext()/playPrevious() (see player.js), since ExoPlayer itself only
+    // ever has one track loaded and has no "next item" of its own to go to.
+    public void notifyRemoteAction(String action) {
+        JSObject data = new JSObject();
+        data.put("action", action);
+        notifyListeners("remoteAction", data);
+    }
 
     private ExoPlayer currentPlayer() {
         PlaybackService service = PlaybackService.getInstance();

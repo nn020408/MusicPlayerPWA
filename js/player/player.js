@@ -27,6 +27,22 @@ function nativePlayerPlugin() {
 export const audioEl = nativePlayerPlugin() ? new NativeAudioElement(nativePlayerPlugin()) : new Audio();
 audioEl.preload = "auto";
 
+// Native engine only — a hardware/Bluetooth/notification-tap Next or
+// Previous press. Unlike play/pause/seek (which ExoPlayer can genuinely
+// handle itself against whatever one track it has loaded), skipping has
+// nowhere to go on a single-item player: ExoPlayer's own next/previous is a
+// no-op since it knows nothing about the real queue, which lives here in
+// JS. QueueAwarePlayer (PlaybackService.java) intercepts the native
+// next/previous command and forwards it here instead — confirmed on-device
+// that without this, the notification's Next button looked real (a working
+// PendingIntent) but silently did nothing when pressed.
+if (nativePlayerPlugin()) {
+  nativePlayerPlugin().addListener("remoteAction", ({ action }) => {
+    if (action === "next") playNext();
+    else if (action === "previous") playPrevious();
+  });
+}
+
 // Only present inside the Capacitor-wrapped Android app (js/vendor/) — a
 // real Android foreground service tied to media playback, which is what
 // actually survives Samsung's background process killing. navigator.

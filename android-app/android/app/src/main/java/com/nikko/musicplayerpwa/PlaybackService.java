@@ -44,7 +44,13 @@ public class PlaybackService extends MediaSessionService {
         super.onCreate();
         instance = this;
         player = new ExoPlayer.Builder(this).build();
-        mediaSession = new MediaSession.Builder(this, player).build();
+        // The session is given a QueueAwarePlayer wrapper, not the raw
+        // ExoPlayer directly, so hardware/notification Next/Previous
+        // actually reach JS's real queue instead of silently no-op'ing
+        // against ExoPlayer's own always-single-item "playlist" — see
+        // QueueAwarePlayer's own comment for why. getPlayer() below still
+        // returns the raw, unwrapped player for everything else.
+        mediaSession = new MediaSession.Builder(this, new QueueAwarePlayer(player)).build();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notificationManager = getSystemService(NotificationManager.class);
