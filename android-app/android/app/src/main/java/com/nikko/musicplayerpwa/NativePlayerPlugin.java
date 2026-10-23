@@ -17,17 +17,31 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-// JS-facing surface for the native playback engine (feature/native-playback,
-// skeleton stage — see PlaybackService). Events go through notifyListeners()
-// rather than the setKeepAlive()+re-resolve trick @jofr/capacitor-media-
-// session uses: that pattern is vendored third-party code, not this
-// codebase's own convention, and notifyListeners() is Capacitor's ordinary
-// mechanism for exactly this ("repeated events, possibly more than one
-// listener") case.
+// JS-facing surface for the native playback engine (feature/native-playback
+// — see js/player/nativeAudioElement.js, which this exists to back). Events
+// go through notifyListeners() rather than the setKeepAlive()+re-resolve
+// trick @jofr/capacitor-media-session uses: that pattern is vendored
+// third-party code, not this codebase's own convention, and notifyListeners()
+// is Capacitor's ordinary mechanism for exactly this ("repeated events,
+// possibly more than one listener") case.
 @CapacitorPlugin(name = "NativePlayer")
 public class NativePlayerPlugin extends Plugin {
+    private static final long POSITION_TICK_MS = 500;
+
     private final Handler main = new Handler(Looper.getMainLooper());
     private Player.Listener playerListener;
+    private final Runnable positionTicker = this::tickPosition;
+    private boolean tickerRunning = false;
+
+    // The load()/play() call waiting for playback to genuinely start (not
+    // just "requested") -- mirrors the exact contract player.js already
+    // depends on for the web <audio> element: loadedTrackId is set only once
+    // audioEl.play() has actually resolved, not right after .src is
+    // assigned, specifically so a load that's requested but never actually
+    // starts (buffering failure, network drop) doesn't get treated as
+    // "loaded" by resumePlayback()'s fast path. See player.js's comment on
+    // loadedTrackId for the bug this guards against.
+    private PluginCall pendingStartCall;
 
     private ExoPlayer currentPlayer() {
         PlaybackService service = PlaybackService.getInstance();
@@ -35,10 +49,10 @@ public class NativePlayerPlugin extends Plugin {
     }
 
     // startForegroundService() returning doesn't mean the Service has
-    // actually run onCreate() yet — this crude poll-with-timeout stands in
-    // for a proper bind/ready callback until the full queue port (milestone
-    // 2) replaces it; fine for a first on-device smoke test, not meant to
-    // ship as-is.
+    // actually run onCreate() yet -- this crude poll-with-timeout stands in
+    // for a proper bind/ready callback; fine since PlaybackService.onCreate()
+    // itself calls startForeground() synchronously (see its own comment), so
+    // in practice this resolves on the very first or second poll.
     private void withPlayerReady(int attemptsLeft, Runnable onReady, Runnable onTimeout) {
         ExoPlayer player = currentPlayer();
         if (player != null) {
@@ -52,6 +66,43 @@ public class NativePlayerPlugin extends Plugin {
         main.postDelayed(() -> withPlayerReady(attemptsLeft - 1, onReady, onTimeout), 50);
     }
 
+    private void resolvePendingStart() {
+        if (pendingStartCall != null) {
+            pendingStartCall.resolve();
+            pendingStartCall = null;
+        }
+    }
+
+    private void rejectPendingStart(String message) {
+        if (pendingStartCall != null) {
+            pendingStartCall.reject(message);
+            pendingStartCall = null;
+        }
+    }
+
+    private void startPositionTicker() {
+        if (tickerRunning) return;
+        tickerRunning = true;
+        main.post(positionTicker);
+    }
+
+    private void stopPositionTicker() {
+        tickerRunning = false;
+        main.removeCallbacks(positionTicker);
+    }
+
+    private void tickPosition() {
+        if (!tickerRunning) return;
+        ExoPlayer player = currentPlayer();
+        if (player != null) {
+            JSObject data = new JSObject();
+            data.put("positionMs", player.getCurrentPosition());
+            data.put("durationMs", player.getDuration());
+            notifyListeners("positionUpdate", data);
+        }
+        main.postDelayed(positionTicker, POSITION_TICK_MS);
+    }
+
     private void attachListenerIfNeeded(ExoPlayer player) {
         if (playerListener != null) return;
         playerListener = new Player.Listener() {
@@ -60,12 +111,20 @@ public class NativePlayerPlugin extends Plugin {
                 JSObject data = new JSObject();
                 data.put("playing", isPlaying);
                 data.put("positionMs", player.getCurrentPosition());
+                data.put("durationMs", player.getDuration());
                 notifyListeners("playbackState", data);
+                if (isPlaying) {
+                    startPositionTicker();
+                    resolvePendingStart();
+                } else {
+                    stopPositionTicker();
+                }
             }
 
             @Override
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_ENDED) {
+                    stopPositionTicker();
                     notifyListeners("trackEnded", new JSObject());
                 }
             }
@@ -75,6 +134,7 @@ public class NativePlayerPlugin extends Plugin {
                 JSObject data = new JSObject();
                 data.put("message", error.getMessage());
                 notifyListeners("error", data);
+                rejectPendingStart(error.getMessage());
             }
         };
         player.addListener(playerListener);
@@ -90,7 +150,6 @@ public class NativePlayerPlugin extends Plugin {
         String title = call.getString("title", "");
         String artist = call.getString("artist", "");
         String album = call.getString("album", "");
-        double resumePositionMs = call.getDouble("resumePositionMs", 0.0);
 
         Intent intent = new Intent(getContext(), PlaybackService.class);
         ContextCompat.startForegroundService(getContext(), intent);
@@ -104,16 +163,17 @@ public class NativePlayerPlugin extends Plugin {
                         return;
                     }
                     attachListenerIfNeeded(player);
+                    rejectPendingStart("Superseded by a newer load/play call");
+                    pendingStartCall = call;
                     MediaMetadata metadata = new MediaMetadata.Builder()
                             .setTitle(title)
                             .setArtist(artist)
                             .setAlbumTitle(album)
                             .build();
                     MediaItem item = new MediaItem.Builder().setUri(url).setMediaMetadata(metadata).build();
-                    player.setMediaItem(item, Math.round(resumePositionMs));
+                    player.setMediaItem(item);
                     player.prepare();
                     player.play();
-                    call.resolve();
                 }),
                 () -> call.reject("Playback service didn't start in time")
         );
@@ -123,9 +183,18 @@ public class NativePlayerPlugin extends Plugin {
     public void play(PluginCall call) {
         main.post(() -> {
             ExoPlayer player = currentPlayer();
-            if (player != null) player.play();
+            if (player == null) {
+                call.reject("Playback service not available");
+                return;
+            }
+            if (player.isPlaying()) {
+                call.resolve();
+                return;
+            }
+            rejectPendingStart("Superseded by a newer load/play call");
+            pendingStartCall = call;
+            player.play();
         });
-        call.resolve();
     }
 
     @PluginMethod
@@ -145,6 +214,36 @@ public class NativePlayerPlugin extends Plugin {
             if (player != null) player.seekTo(Math.round(positionMs));
         });
         call.resolve();
+    }
+
+    // Updates the currently-loaded item's metadata (title/artist/album) once
+    // the real ID3 tags resolve, without restarting playback or losing
+    // position -- ExoPlayer's replaceMediaItem() is specifically designed to
+    // preserve both across a metadata-only change. See player.js's
+    // updateMediaSessionMetadata()/the id3Promise .then() block, which call
+    // this the same way they already call the (now-redundant but harmless)
+    // old native plugin's setMetadata().
+    @PluginMethod
+    public void setMetadata(PluginCall call) {
+        String title = call.getString("title", "");
+        String artist = call.getString("artist", "");
+        String album = call.getString("album", "");
+        main.post(() -> {
+            ExoPlayer player = currentPlayer();
+            if (player == null || player.getCurrentMediaItem() == null) {
+                call.resolve();
+                return;
+            }
+            MediaItem current = player.getCurrentMediaItem();
+            MediaMetadata metadata = new MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .setAlbumTitle(album)
+                    .build();
+            MediaItem updated = current.buildUpon().setMediaMetadata(metadata).build();
+            player.replaceMediaItem(player.getCurrentMediaItemIndex(), updated);
+            call.resolve();
+        });
     }
 
     @PluginMethod

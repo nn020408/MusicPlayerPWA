@@ -32,7 +32,7 @@ const document = {
   head: stub(),
 };
 const ctx = {
-  console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Map, Set, AbortController, URL, Blob, TextDecoder, Date, Math, JSON, Array, Object, String, Number, RegExp, Error, Uint8Array, ArrayBuffer, DataView, btoa: (s) => Buffer.from(s, "binary").toString("base64"),
+  console, setTimeout, clearTimeout, setInterval, clearInterval, Promise, Map, Set, AbortController, URL, Blob, TextDecoder, Date, Math, JSON, Array, Object, String, Number, RegExp, Error, Uint8Array, ArrayBuffer, DataView, EventTarget, Event, btoa: (s) => Buffer.from(s, "binary").toString("base64"),
   window, document, navigator: { userAgent: "test", mediaSession: undefined },
   localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
   Audio: function () { return stub("audio"); }, MediaMetadata: function () {}, FileReader: function () {},

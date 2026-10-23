@@ -26,6 +26,7 @@ const SHELL_FILES = [
   "./js/data/textMatch.js",
   "./js/main.js",
   "./js/player/carMediaSession.js",
+  "./js/player/nativeAudioElement.js",
   "./js/player/player.js",
   "./js/player/prefetch.js",
   "./js/state/browse.js",

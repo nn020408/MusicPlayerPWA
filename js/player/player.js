@@ -1,14 +1,30 @@
 // Streaming audio playback + lock-screen / notification controls via the
 // Media Session API, plus shuffle/repeat queue management.
 
+import { isNative } from "../core/platform.js";
 import { pauseWithGrace, setWantsToPlay, wantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
 import { forgetTrack, libraryTracks, slimTrack } from "../data/library.js";
 import { updateCarMetadata, updateCarPlaybackState } from "./carMediaSession.js";
+import { NativeAudioElement } from "./nativeAudioElement.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
-export const audioEl = new Audio();
+// Only present inside the Capacitor-wrapped Android app, once the native
+// playback engine (ExoPlayer, via PlaybackService) is installed — see
+// NativeAudioElement for why this exists and what it replaces: a real native
+// foreground service never gets frozen by Chromium's background-tab JS
+// policy the way the WebView's own <audio> element effectively does, so
+// controlling an already-loaded track (play/pause/seek) stops depending on
+// the WebView staying unfrozen at all. Guarded the same defensive way
+// nativeMediaSession() below is, so every existing jsdom test (where
+// Capacitor.Plugins.NativePlayer is simply undefined) keeps exercising this
+// exact <audio>-element path, unchanged.
+function nativePlayerPlugin() {
+  return isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
+}
+
+export const audioEl = nativePlayerPlugin() ? new NativeAudioElement(nativePlayerPlugin()) : new Audio();
 audioEl.preload = "auto";
 
 // Only present inside the Capacitor-wrapped Android app (js/vendor/) — a
@@ -18,7 +34,18 @@ audioEl.preload = "auto";
 // best-effort background exemption, which Samsung ignores regardless of
 // battery-optimization settings. Harmless no-op everywhere else (the plain
 // website, or if the vendor scripts ever fail to load).
+//
+// Suppressed once the new native engine (nativePlayerPlugin() above) is
+// active: confirmed on-device that running both sessions at once doesn't
+// just waste calls, it actively breaks things — Android picked THIS one
+// (whichever session gets touched most recently looks "more active" to it)
+// as the session hardware/Bluetooth/lock-screen buttons route to, even
+// though its own action handlers still need the WebView's JS to be running
+// to do anything — exactly the problem the native engine exists to avoid.
+// Leaving this plugin's own session merely unused/stale is what lets
+// Android correctly prefer the new one instead.
 function nativeMediaSession() {
+  if (nativePlayerPlugin()) return false;
   return window.Capacitor && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins.MediaSession;
 }
 
@@ -335,6 +362,8 @@ export async function playCurrent() {
       const title = tags.title || item.name.replace(/\.[^/.]+$/, "");
       const artist = tags.artist || (item.audio && item.audio.artist) || "OneDrive";
       const album = tags.album || (item.audio && item.audio.album) || "";
+
+      if (audioEl.setNowPlayingMetadata) audioEl.setNowPlayingMetadata({ title, artist, album });
 
       if ("mediaSession" in navigator && navigator.mediaSession.metadata) {
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -766,6 +795,12 @@ function updateMediaSessionMetadata(item) {
   const title = item.name.replace(/\.[^/.]+$/, "");
   const artist = (item.audio && item.audio.artist) || "OneDrive";
   const album = (item.audio && item.audio.album) || "";
+
+  // Native engine only — not part of the real <audio> element's own
+  // surface. load()/play() don't know the track's title/artist/album (they
+  // only ever see a bare URL), so the native session briefly shows nothing
+  // until this corrects it, moments after playback actually starts.
+  if (audioEl.setNowPlayingMetadata) audioEl.setNowPlayingMetadata({ title, artist, album });
 
   // "play" goes through resumePlayback() rather than audioEl.play() directly
   // — that's what checks loadedTrackId and reloads via playCurrent() if the
