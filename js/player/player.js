@@ -265,7 +265,12 @@ export async function playCurrent() {
     if (nextItem) {
       getThumbnailUrl(nextItem.id); // pre-warm cache so skipping feels instant
       prefetchDownloadUrl(nextItem); // keeps auto-advance working screen-off — see player/prefetch.js
-      prefetchNextTrackBlob(nextItem, item.id); // same goal, stronger guarantee; item.id spares THIS track's own already-prefetched blob, about to be read just below
+      // blob: URLs only mean anything to the WebView's own Blob registry —
+      // ExoPlayer (the native engine) can't stream one at all, so skip this
+      // whole optimization there. Native already does its own buffering;
+      // this exists only to survive the WebView-freeze gap at a track
+      // transition, which doesn't apply once native owns playback.
+      if (!isNative()) prefetchNextTrackBlob(nextItem, item.id); // same goal as prefetchDownloadUrl, stronger guarantee; item.id spares THIS track's own already-prefetched blob, about to be read just below
     }
   }
 
@@ -284,7 +289,9 @@ export async function playCurrent() {
         let url = null;
         let usedBlobUrl = null;
         if (attemptNumber === 0) {
-          url = takePrefetchedBlobUrl(item.id);
+          // Same blob: URL caveat as above — never hand one to the native
+          // engine, only ever to the real <audio> element.
+          if (!isNative()) url = takePrefetchedBlobUrl(item.id);
           if (url) usedBlobUrl = url;
           else url = takePrefetchedUrl(item.id);
         }
