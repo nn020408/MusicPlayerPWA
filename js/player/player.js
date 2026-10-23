@@ -265,12 +265,7 @@ export async function playCurrent() {
     if (nextItem) {
       getThumbnailUrl(nextItem.id); // pre-warm cache so skipping feels instant
       prefetchDownloadUrl(nextItem); // keeps auto-advance working screen-off — see player/prefetch.js
-      // blob: URLs only mean anything to the WebView's own Blob registry —
-      // ExoPlayer (the native engine) can't stream one at all, so skip this
-      // whole optimization there. Native already does its own buffering;
-      // this exists only to survive the WebView-freeze gap at a track
-      // transition, which doesn't apply once native owns playback.
-      if (!isNative()) prefetchNextTrackBlob(nextItem, item.id); // same goal as prefetchDownloadUrl, stronger guarantee; item.id spares THIS track's own already-prefetched blob, about to be read just below
+      prefetchNextTrackBlob(nextItem, item.id); // same goal, stronger guarantee (no-ops on native — see prefetch.js); item.id spares THIS track's own already-prefetched blob, about to be read just below
     }
   }
 
@@ -289,9 +284,10 @@ export async function playCurrent() {
         let url = null;
         let usedBlobUrl = null;
         if (attemptNumber === 0) {
-          // Same blob: URL caveat as above — never hand one to the native
-          // engine, only ever to the real <audio> element.
-          if (!isNative()) url = takePrefetchedBlobUrl(item.id);
+          // Never populated on native (see prefetchNextTrackBlob in
+          // prefetch.js) — this always misses there, falling straight
+          // through to the plain URL prefetch below.
+          url = takePrefetchedBlobUrl(item.id);
           if (url) usedBlobUrl = url;
           else url = takePrefetchedUrl(item.id);
         }
@@ -569,6 +565,13 @@ export function seekTo(seconds) {
 // is cleared separately by the caller; this only handles the live runtime state.
 export function resetPlayer() {
   setWantsToPlay(false);
+  // Native engine only: pause()/removeAttribute("src")/load() below only
+  // ever touch this module's own JS state (see NativeAudioElement) -- stop()
+  // is what actually tells the native engine to let go of whatever's
+  // loaded, instead of leaving the previous (possibly now signed-out)
+  // account's track sitting paused in the foreground notification/lock-
+  // screen session indefinitely.
+  if (audioEl.stop) audioEl.stop();
   audioEl.pause();
   audioEl.removeAttribute("src");
   audioEl.load();

@@ -6,6 +6,7 @@
 // not JS-dependent); it's specifically the *transition* to the next one this
 // protects. Used only by player.js's playCurrent()/resetPlayer().
 
+import { isNative } from "../core/platform.js";
 import { getDownloadUrl, retryWithBackoff } from "../data/graph.js";
 
 const prefetchedUrls = new Map(); // itemId -> streaming url
@@ -66,6 +67,13 @@ function revokeStaleBlobPrefetches(exceptItemId, keepItemId) {
 
 export function prefetchNextTrackBlob(item, keepItemId) {
   if (!item || prefetchedBlobUrls.has(item.id)) return;
+  // A blob: URL only means anything to the WebView's own Blob registry —
+  // the native engine (ExoPlayer) has no way to resolve one at all, and
+  // already does its own buffering, so this whole optimization (and the
+  // bandwidth it costs) is both useless and actively wrong there. Guarded
+  // here, at the one place blob: URLs actually get produced, rather than at
+  // every call site that might consume one — see takePrefetchedBlobUrl.
+  if (isNative()) return;
   if (blobPrefetch && blobPrefetch.itemId === item.id) return;
   // Respect an explicit data-saver signal — this trades bandwidth for
   // reliability, which isn't the right call for someone who's opted into

@@ -8,23 +8,23 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 
+import android.support.v4.media.session.PlaybackStateCompat;
+
 import androidx.core.app.NotificationCompat;
+import androidx.media.session.MediaButtonReceiver;
+import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.session.MediaSession;
 import androidx.media3.session.MediaSessionService;
+import androidx.media3.session.MediaStyleNotificationHelper;
 
 // Native audio engine (feature/native-playback) — replaces the WebView
 // <audio> element for actual decode/playback, so controlling an
 // already-loaded track (play/pause/seek) no longer depends on Chromium's
 // background-tab JS freeze exemption staying intact (see js/core/
 // playbackIntent.js and js/player/player.js for the problem this solves).
-//
-// Skeleton stage: one ExoPlayer + one MediaSession, exposed to
-// NativePlayerPlugin via a static instance rather than bind/binder — simplest
-// thing that lets the very first on-device smoke test (load one hardcoded
-// URL, play/pause it via a real remote key while backgrounded+locked) run
-// before any queue/retry/persistence logic is ported over.
 public class PlaybackService extends MediaSessionService {
     private static final String CHANNEL_ID = "playback";
     private static final int NOTIFICATION_ID = 1;
@@ -33,6 +33,7 @@ public class PlaybackService extends MediaSessionService {
 
     private ExoPlayer player;
     private MediaSession mediaSession;
+    private NotificationManager notificationManager;
 
     public static PlaybackService getInstance() {
         return instance;
@@ -45,35 +46,101 @@ public class PlaybackService extends MediaSessionService {
         player = new ExoPlayer.Builder(this).build();
         mediaSession = new MediaSession.Builder(this, player).build();
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager = getSystemService(NotificationManager.class);
+            if (notificationManager.getNotificationChannel(CHANNEL_ID) == null) {
+                notificationManager.createNotificationChannel(new NotificationChannel(CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW));
+            }
+        } else {
+            notificationManager = getSystemService(NotificationManager.class);
+        }
+
         // Context.startForegroundService() REQUIRES Service.startForeground()
         // within a few seconds, or the system kills the whole process with
         // ForegroundServiceDidNotStartInTimeException — confirmed on-device:
         // relying on Media3's own automatic notification/foreground handling
-        // (triggered off player state) wasn't enough by itself here, so this
-        // calls startForeground() synchronously in onCreate(), immediately
-        // after the service process starts, same as the old @jofr plugin's
-        // MediaSessionService.connectAndInitialize() did. Media3's own
-        // MediaNotificationManager can still take over updating this
-        // notification's content as playback state/metadata change.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-                nm.createNotificationChannel(new NotificationChannel(CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW));
-            }
-        }
-        Intent contentIntent = new Intent(this, MainActivity.class);
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("NubePlayer")
-                .setContentText("Loading…")
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentIntent(PendingIntent.getActivity(this, 0, contentIntent, PendingIntent.FLAG_IMMUTABLE))
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .build();
+        // wasn't enough by itself here, so this builds and posts a real
+        // notification (with working transport buttons — see buildNotification()
+        // below) synchronously in onCreate(), immediately after the service
+        // process starts, same as the old @jofr plugin's MediaSessionService.
+        // connectAndInitialize() did.
+        Notification notification = buildNotification();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
+
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onIsPlayingChanged(boolean isPlaying) {
+                updateNotification();
+            }
+
+            @Override
+            public void onMediaMetadataChanged(MediaMetadata mediaMetadata) {
+                updateNotification();
+            }
+
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                updateNotification();
+            }
+        });
+    }
+
+    // Built by hand, not left to Media3's own automatic notification manager
+    // — confirmed on-device via `dumpsys notification` that relying on the
+    // default behavior here posted a notification with zero action buttons
+    // (no play/pause/skip at all), presumably because calling
+    // startForeground() with a manually-built notification in onCreate()
+    // (required for the timing reason above) pre-empts Media3's own first
+    // post. MediaStyleNotificationHelper.MediaStyle is Media3's own
+    // notification-style helper for exactly this hand-built case; actions
+    // still route through the same androidx.media MediaButtonReceiver the
+    // old @jofr plugin used (see the receiver declaration in
+    // AndroidManifest.xml), which the session is already configured to
+    // expect (confirmed via dumpsys media_session showing that component as
+    // the session's mediaButtonReceiver even before this was added).
+    private Notification buildNotification() {
+        MediaMetadata metadata = player.getMediaMetadata();
+        String title = metadata.title != null ? metadata.title.toString() : "NubePlayer";
+        String artist = metadata.artist != null ? metadata.artist.toString() : "";
+        boolean isPlaying = player.isPlaying();
+
+        Intent contentIntent = new Intent(this, MainActivity.class);
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(artist)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(PendingIntent.getActivity(this, 0, contentIntent, PendingIntent.FLAG_IMMUTABLE))
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setOngoing(isPlaying)
+                .addAction(
+                        android.R.drawable.ic_media_previous, "Previous",
+                        MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
+                )
+                .addAction(
+                        isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
+                        isPlaying ? "Pause" : "Play",
+                        MediaButtonReceiver.buildMediaButtonPendingIntent(
+                                this,
+                                isPlaying ? PlaybackStateCompat.ACTION_PAUSE : PlaybackStateCompat.ACTION_PLAY
+                        )
+                )
+                .addAction(
+                        android.R.drawable.ic_media_next, "Next",
+                        MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_SKIP_TO_NEXT)
+                )
+                .setStyle(
+                        new MediaStyleNotificationHelper.MediaStyle(mediaSession)
+                                .setShowActionsInCompactView(0, 1, 2)
+                );
+        return builder.build();
+    }
+
+    private void updateNotification() {
+        if (notificationManager != null) notificationManager.notify(NOTIFICATION_ID, buildNotification());
     }
 
     @Override

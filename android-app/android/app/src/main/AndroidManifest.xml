@@ -58,8 +58,7 @@
         <!-- Native playback engine (feature/native-playback) — real ExoPlayer
              decode/output in a genuine foreground service, so controlling an
              already-loaded track doesn't depend on the WebView's JS staying
-             unfrozen. Not yet wired as the app's only media session — see
-             PlaybackService/NativePlayerPlugin. -->
+             unfrozen. See PlaybackService/NativePlayerPlugin. -->
         <service
             android:name=".PlaybackService"
             android:exported="false"
@@ -68,6 +67,19 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <!-- Where a hardware/Bluetooth/notification media-button PendingIntent
+             (built via MediaButtonReceiver.buildMediaButtonPendingIntent() in
+             PlaybackService's notification) actually gets delivered. Used to
+             come for free from @jofr/capacitor-media-session's own merged
+             manifest; needs declaring explicitly now that that plugin's gone. -->
+        <receiver
+            android:name="androidx.media.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -81,13 +93,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- @jofr/capacitor-media-session's own manifest already declares
-         FOREGROUND_SERVICE and the mediaPlayback service type; Android 14
-         (API 34) additionally requires this specific permission to start a
-         mediaPlayback-typed foreground service, and POST_NOTIFICATIONS to
-         show the persistent playback notification (requested at runtime in
-         MainActivity). Both are required for Samsung's foreground-service
-         kill exemption to actually apply. -->
+    <!-- Android 14 (API 34) requires this specific permission to start a
+         mediaPlayback-typed foreground service (PlaybackService), and
+         POST_NOTIFICATIONS to show the persistent playback notification
+         (requested at runtime in MainActivity). Both are required for
+         Samsung's foreground-service kill exemption to actually apply. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Artist indexing keeps running with the screen off through a dataSync

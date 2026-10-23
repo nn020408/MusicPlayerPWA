@@ -30,6 +30,12 @@ public class NativePlayerPlugin extends Plugin {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private Player.Listener playerListener;
+    // Which ExoPlayer instance playerListener is currently attached to --
+    // PlaybackService can be killed and recreated (onTaskRemoved, or the OS
+    // reclaiming it under memory pressure) with a brand new ExoPlayer, and
+    // "playerListener != null" alone can't tell the old, orphaned listener
+    // apart from one that's actually attached to the current player.
+    private ExoPlayer listenerAttachedTo;
     private final Runnable positionTicker = this::tickPosition;
     private boolean tickerRunning = false;
 
@@ -104,7 +110,7 @@ public class NativePlayerPlugin extends Plugin {
     }
 
     private void attachListenerIfNeeded(ExoPlayer player) {
-        if (playerListener != null) return;
+        if (listenerAttachedTo == player) return;
         playerListener = new Player.Listener() {
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
@@ -126,6 +132,9 @@ public class NativePlayerPlugin extends Plugin {
                 if (state == Player.STATE_ENDED) {
                     stopPositionTicker();
                     notifyListeners("trackEnded", new JSObject());
+                    // Reached the end without ever actually playing (e.g. a
+                    // corrupt/zero-length file) -- nothing left to wait for.
+                    rejectPendingStart("Playback ended before it started");
                 }
             }
 
@@ -138,6 +147,7 @@ public class NativePlayerPlugin extends Plugin {
             }
         };
         player.addListener(playerListener);
+        listenerAttachedTo = player;
     }
 
     @PluginMethod
@@ -150,6 +160,7 @@ public class NativePlayerPlugin extends Plugin {
         String title = call.getString("title", "");
         String artist = call.getString("artist", "");
         String album = call.getString("album", "");
+        long resumePositionMs = Math.round(call.getDouble("resumePositionMs", 0.0));
 
         Intent intent = new Intent(getContext(), PlaybackService.class);
         ContextCompat.startForegroundService(getContext(), intent);
@@ -171,7 +182,7 @@ public class NativePlayerPlugin extends Plugin {
                             .setAlbumTitle(album)
                             .build();
                     MediaItem item = new MediaItem.Builder().setUri(url).setMediaMetadata(metadata).build();
-                    player.setMediaItem(item);
+                    player.setMediaItem(item, resumePositionMs);
                     player.prepare();
                     player.play();
                 }),
@@ -202,6 +213,28 @@ public class NativePlayerPlugin extends Plugin {
         main.post(() -> {
             ExoPlayer player = currentPlayer();
             if (player != null) player.pause();
+            // playWhenReady=false means onIsPlayingChanged(true) will never
+            // fire for whatever load()/play() call is still waiting -- left
+            // unresolved otherwise, confirmed on-device to hang forever
+            // (e.g. resetPlayer() pausing while a track is still buffering).
+            rejectPendingStart("Paused before playback started");
+        });
+        call.resolve();
+    }
+
+    // Used by resetPlayer() (sign-out) to fully let go of whatever's loaded,
+    // rather than leaving the previous (possibly now signed-out) account's
+    // track sitting paused in the foreground notification/lock-screen
+    // session indefinitely.
+    @PluginMethod
+    public void stop(PluginCall call) {
+        main.post(() -> {
+            ExoPlayer player = currentPlayer();
+            if (player != null) {
+                player.stop();
+                player.clearMediaItems();
+            }
+            rejectPendingStart("Stopped");
         });
         call.resolve();
     }

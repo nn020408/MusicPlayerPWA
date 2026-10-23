@@ -63,6 +63,16 @@ export class NativeAudioElement extends EventTarget {
   }
   set currentTime(seconds) {
     this._currentTime = seconds;
+    // A pending (not yet loaded) src means there's nothing in native to seek
+    // on yet — seeking now would hit whatever track is still loaded from
+    // BEFORE this .src assignment. play() below reads _currentTime back out
+    // and passes it as resumePositionMs instead, so a "src = url; currentTime
+    // = resumeAt; play()" sequence (used for both a fresh track's restored
+    // position and the error-retry reconnect) resumes at the right spot
+    // rather than always restarting at 0. Confirmed on-device: without this
+    // guard, reconnecting after a dropped connection silently restarted the
+    // track from the beginning instead of resuming.
+    if (this._pendingLoad) return;
     this._plugin.seekTo({ positionMs: Math.round(seconds * 1000) });
     // A real <audio> element fires "seeked" asynchronously once the seek
     // actually completes; approximate that here so updatePositionState()
@@ -104,7 +114,12 @@ export class NativeAudioElement extends EventTarget {
     // call order (updateMediaSessionMetadata() only runs after play()
     // resolves) — setNowPlayingMetadata() below corrects this moments later,
     // via the plugin's setMetadata(), without needing to restart playback.
-    const request = url ? this._plugin.load({ url, title: "", artist: "", album: "" }) : this._plugin.play();
+    // resumePositionMs carries over whatever currentTime was set to since
+    // .src was assigned (see the currentTime setter above) — 0 for a fresh
+    // track, or a real resume position for a restored/reconnecting one.
+    const request = url
+      ? this._plugin.load({ url, title: "", artist: "", album: "", resumePositionMs: Math.round(this._currentTime * 1000) })
+      : this._plugin.play();
     return request.then(() => {
       this._paused = false;
       this._error = null;
@@ -114,6 +129,22 @@ export class NativeAudioElement extends EventTarget {
   pause() {
     this._plugin.pause();
     this._paused = true;
+  }
+
+  // Not part of the <audio> element surface — player.js's resetPlayer()
+  // (sign-out) calls this (`audioEl.stop && audioEl.stop()`) so the native
+  // engine actually lets go of whatever's loaded, instead of leaving the
+  // previous (possibly now signed-out) account's track sitting paused in
+  // the foreground notification/lock-screen session indefinitely -- pause()/
+  // removeAttribute("src")/load() only ever touched local JS state, never
+  // told native to release anything.
+  stop() {
+    this._plugin.stop();
+    this._paused = true;
+    this._src = "";
+    this._pendingLoad = null;
+    this._currentTime = 0;
+    this._duration = NaN;
   }
 
   load() {
