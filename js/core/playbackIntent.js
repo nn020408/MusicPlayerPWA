@@ -100,22 +100,22 @@ function makeKeepAliveDataUri() {
   return "data:audio/wav;base64," + btoa(binary);
 }
 
-// Only needed for the WebView <audio>-element playback path. The native
-// engine (ExoPlayer, via NativePlayerPlugin — see js/player/
-// nativeAudioElement.js) never has the WebView-freeze problem this tone
-// exists to work around at all, since it's real native code, not something
-// Chromium's background-tab policy can freeze. Gating on isNative() alone
-// (true for BOTH paths) was a real regression: it left this tone playing
-// CONCURRENTLY with the native engine's own real track audio -- two
-// separate audio outputs, two separate audio focus requests, from the same
-// app at once. That's the direct cause of two reported symptoms at once:
-// the tone itself becoming audible again ("boo boo boo" — the exact
-// original bug this file's own history comments describe), and the app
-// failing to respect other apps' audio (one of its two simultaneous focus
-// requests stepping on whatever ducking/pausing the other was supposed to
-// get).
+// Needed even with the native engine (ExoPlayer, via NativePlayerPlugin) —
+// a real regression was introduced and then un-done here, worth recording:
+// actual audio OUTPUT moved to native, which indeed never gets frozen by
+// Chromium's background-tab policy. But Next/Previous and auto-advance-to-
+// the-next-track still have to ask THIS WebView's JS "what's next, get me a
+// fresh streaming URL for it" (see QueueAwarePlayer.java's forward to
+// notifyRemoteAction, and the "ended" handling in player.js) — and once
+// this tone stopped running, this WebView had zero audio signal of its own
+// again, so Chromium had no reason not to freeze its JS. Confirmed on real
+// devices: Play/Pause (handled entirely natively, no JS involved) kept
+// working, while Next/Previous/auto-advance all silently queued until the
+// app was reopened by hand — exactly what this tone exists to prevent.
+// Keeping it active is what it costs to keep those working too, given the
+// queue/Graph-API logic they depend on is still JS, not native.
 let keepAliveEl = null;
-if (isNative() && !(window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer)) {
+if (isNative()) {
   keepAliveEl = new Audio(makeKeepAliveDataUri());
   keepAliveEl.loop = true;
   keepAliveEl.volume = 0.002; // quietest level confirmed on-device to actually keep the freeze exemption — see the comment above
