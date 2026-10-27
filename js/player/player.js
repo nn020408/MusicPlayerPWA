@@ -8,18 +8,14 @@ import { readId3Tags } from "../data/id3.js";
 import { forgetTrack, libraryTracks, slimTrack } from "../data/library.js";
 import { updateCarMetadata, updateCarPlaybackState } from "./carMediaSession.js";
 import { NativeAudioElement } from "./nativeAudioElement.js";
+import { initNativeQueueSync, syncNativeQueue, syncNativeRepeatMode } from "./nativeQueueSync.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
 // Only present inside the Capacitor-wrapped Android app, once the native
-// playback engine (ExoPlayer, via PlaybackService) is installed — see
-// NativeAudioElement for why this exists and what it replaces: a real native
-// foreground service never gets frozen by Chromium's background-tab JS
-// policy the way the WebView's own <audio> element effectively does, so
-// controlling an already-loaded track (play/pause/seek) stops depending on
-// the WebView staying unfrozen at all. Guarded the same defensive way
-// nativeMediaSession() below is, so every existing jsdom test (where
-// Capacitor.Plugins.NativePlayer is simply undefined) keeps exercising this
-// exact <audio>-element path, unchanged.
+// playback engine (ExoPlayer, via PlaybackService) is installed — a real
+// native foreground service never gets frozen by Chromium's background-tab
+// JS policy the way the WebView's own <audio> element does. Guarded
+// defensively so jsdom tests (NativePlayer undefined) exercise the <audio> path.
 function nativePlayerPlugin() {
   return isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
 }
@@ -27,21 +23,8 @@ function nativePlayerPlugin() {
 export const audioEl = nativePlayerPlugin() ? new NativeAudioElement(nativePlayerPlugin()) : new Audio();
 audioEl.preload = "auto";
 
-// Native engine only — a hardware/Bluetooth/notification-tap Next or
-// Previous press. Unlike play/pause/seek (which ExoPlayer can genuinely
-// handle itself against whatever one track it has loaded), skipping has
-// nowhere to go on a single-item player: ExoPlayer's own next/previous is a
-// no-op since it knows nothing about the real queue, which lives here in
-// JS. QueueAwarePlayer (PlaybackService.java) intercepts the native
-// next/previous command and forwards it here instead — confirmed on-device
-// that without this, the notification's Next button looked real (a working
-// PendingIntent) but silently did nothing when pressed.
-if (nativePlayerPlugin()) {
-  nativePlayerPlugin().addListener("remoteAction", ({ action }) => {
-    if (action === "next") playNext();
-    else if (action === "previous") playPrevious();
-  });
-}
+// Native engine only — reconciles JS's queue state after native's own Next/Previous/auto-advance.
+initNativeQueueSync(applyNativeTrackChange);
 
 // Only present inside the Capacitor-wrapped Android app (js/vendor/) — a
 // real Android foreground service tied to media playback, which is what
@@ -156,6 +139,7 @@ export function restorePlaybackState() {
     shuffleOn = !!state.shuffleOn;
     repeatMode = state.repeatMode || "off";
     buildOrder(queueIndex);
+    syncNativeQueue(queue, playOrder, orderPos, repeatMode); // native's own queue is otherwise empty until the first mutator runs
     pendingResumeIndex = queueIndex;
     pendingResumePosition = state.position || 0;
     hasPendingResume = true;
@@ -204,6 +188,7 @@ export function setQueue(items, startIndex) {
   queue = items;
   queueIndex = startIndex;
   buildOrder(startIndex);
+  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
 }
 
 // Appends tracks to the END of the upcoming queue (after everything already
@@ -224,16 +209,19 @@ export function addToQueue(tracks) {
   const startLength = queue.length;
   queue = queue.concat(tracks);
   playOrder = playOrder.concat(tracks.map((_, i) => startLength + i));
+  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
 }
 
 export function toggleShuffle() {
   shuffleOn = !shuffleOn;
   buildOrder(queueIndex);
+  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
   player.onShuffleRepeatChange && player.onShuffleRepeatChange(shuffleOn, repeatMode);
 }
 
 export function cycleRepeat() {
   repeatMode = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
+  syncNativeRepeatMode(repeatMode);
   player.onShuffleRepeatChange && player.onShuffleRepeatChange(shuffleOn, repeatMode);
 }
 
@@ -449,6 +437,7 @@ export async function playIndex(index) {
   queueIndex = index;
   orderPos = playOrder.indexOf(index);
   if (orderPos === -1) buildOrder(index);
+  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
   await playCurrent();
 }
 
@@ -529,17 +518,37 @@ function advanceOrderPos(delta) {
   return true;
 }
 
+// On native, a thin pass-through to NativePlayerPlugin.requestNext() — the
+// same method hardware/notification presses reach — so there's one
+// implementation of "what does Next mean," not two that could drift.
 export function playNext() {
+  const plugin = nativePlayerPlugin();
+  if (plugin) return plugin.next();
   if (advanceOrderPos(1)) playCurrent();
   else setWantsToPlay(false); // end of queue, repeat off — nothing left to protect
 }
 
 export function playPrevious() {
+  const plugin = nativePlayerPlugin();
+  if (plugin) return plugin.previous();
   if (audioEl.currentTime > 3) {
     audioEl.currentTime = 0; // restart current track, like most players
   } else if (advanceOrderPos(-1)) {
     playCurrent();
   }
+}
+
+// Reconciles JS's bookkeeping after native already loaded+started `itemId`
+// on its own — read-only, never calls playCurrent()/playNext() itself.
+function applyNativeTrackChange({ itemId, position }) {
+  if (position == null || position < 0 || position >= playOrder.length) return;
+  orderPos = position;
+  queueIndex = playOrder[orderPos];
+  const item = currentTrack();
+  if (!item || item.id !== itemId) return;
+  loadedTrackId = itemId;
+  savePlaybackState();
+  player.onTrackChange && player.onTrackChange(item);
 }
 
 // Pure lookahead over playOrder/queue — both already sit in memory (the
@@ -575,6 +584,7 @@ export function getUpcomingTracks(maxCount) {
 // Session-only, same as shuffle order itself: never persisted.
 export function setUpcomingOrder(orderedQueueIndices) {
   playOrder = playOrder.slice(0, orderPos + 1).concat(orderedQueueIndices);
+  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
 }
 
 export function seekTo(seconds) {
@@ -803,6 +813,8 @@ audioEl.addEventListener("pause", () => {
 });
 audioEl.addEventListener("seeked", updatePositionState);
 audioEl.addEventListener("ended", () => {
+  // Native already decided and acted on this itself (see NativePlayerPlugin.java).
+  if (nativePlayerPlugin()) return;
   if (repeatMode === "one") {
     audioEl.currentTime = 0;
     audioEl.play();

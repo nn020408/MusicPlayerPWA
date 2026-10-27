@@ -11,11 +11,22 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 // JS-facing surface for the native playback engine (feature/native-playback
 // — see js/player/nativeAudioElement.js, which this exists to back). Events
@@ -27,14 +38,22 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "NativePlayer")
 public class NativePlayerPlugin extends Plugin {
     private static final long POSITION_TICK_MS = 500;
+    // Bounds the 404-drop-and-retry loop in resolveAndLoad() so a fully-stale
+    // queue can't spin forever.
+    private static final int MAX_QUEUE_ADVANCE_RETRIES = 25;
 
     // Lets QueueAwarePlayer (owned by PlaybackService, a separate Android
     // component with no direct reference to this plugin instance) reach back
-    // into JS via notifyRemoteAction() below -- the reverse direction of
-    // PlaybackService.getInstance().
+    // into native Next/Previous handling below -- the reverse direction of
+    // PlaybackService.getInstance(). Also reached by NativeAuthClient to
+    // report a token it rotated on its own back to JS.
     private static NativePlayerPlugin instance;
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    // Resolving a queue advance means a blocking Graph network call (see
+    // NativeGraphClient) -- run off both main and Capacitor's own plugin
+    // thread so neither is ever blocked waiting on it.
+    private final ExecutorService queueExecutor = Executors.newSingleThreadExecutor();
     private Player.Listener playerListener;
     // Which ExoPlayer instance playerListener is currently attached to --
     // PlaybackService can be killed and recreated (onTaskRemoved, or the OS
@@ -58,21 +77,15 @@ public class NativePlayerPlugin extends Plugin {
     @Override
     public void load() {
         instance = this;
+        // Pre-warm both from SharedPreferences so a hardware key or a track
+        // genuinely ending can be served immediately, even if this is the
+        // very first thing to touch either class this process.
+        NativeQueueManager.getInstance(getContext());
+        NativeAuthClient.getInstance(getContext());
     }
 
     public static NativePlayerPlugin getInstance() {
         return instance;
-    }
-
-    // Called by QueueAwarePlayer (a different Android component, owned by
-    // PlaybackService) when a hardware/Bluetooth/notification-tap Next or
-    // Previous press comes in -- forwarded to JS's real, queue-aware
-    // playNext()/playPrevious() (see player.js), since ExoPlayer itself only
-    // ever has one track loaded and has no "next item" of its own to go to.
-    public void notifyRemoteAction(String action) {
-        JSObject data = new JSObject();
-        data.put("action", action);
-        notifyListeners("remoteAction", data);
     }
 
     private ExoPlayer currentPlayer() {
@@ -157,10 +170,21 @@ public class NativePlayerPlugin extends Plugin {
             public void onPlaybackStateChanged(int state) {
                 if (state == Player.STATE_ENDED) {
                     stopPositionTicker();
+                    // Fired only for UI/state fidelity now (see
+                    // NativeAudioElement's "trackEnded" listener) -- nothing
+                    // in JS treats this as a trigger anymore. What happens
+                    // next is decided right here, unconditionally, since
+                    // there's no reliable way to know from native code
+                    // whether JS is even awake to react to it.
                     notifyListeners("trackEnded", new JSObject());
-                    // Reached the end without ever actually playing (e.g. a
-                    // corrupt/zero-length file) -- nothing left to wait for.
                     rejectPendingStart("Playback ended before it started");
+                    NativeQueueManager qm = NativeQueueManager.getInstance(getContext());
+                    if ("one".equals(qm.getRepeatMode())) {
+                        player.seekTo(0);
+                        player.play();
+                    } else {
+                        requestNext();
+                    }
                 }
             }
 
@@ -174,6 +198,118 @@ public class NativePlayerPlugin extends Plugin {
         };
         player.addListener(playerListener);
         listenerAttachedTo = player;
+    }
+
+    // Shared by QueueAwarePlayer (hardware/Bluetooth/notification presses)
+    // and the next()/previous() plugin methods below (in-app taps) -- see
+    // this class's own javadoc-style comment and QueueAwarePlayer's for why
+    // there's exactly one implementation of each.
+    void requestNext() {
+        advanceQueue(1);
+    }
+
+    // Reads position and decides restart-vs-go-back on queueExecutor, the
+    // SAME single thread every advance runs on -- NOT a quick check on main
+    // racing an in-flight Next's background network resolve. Confirmed
+    // on-device that doing the check on main while a prior Next/Previous was
+    // still resolving in the background could read a stale, pre-switch
+    // position and make the wrong call; routing everything through one
+    // single-thread executor makes rapid repeated presses process strictly
+    // in order, each seeing the result of the one before it, instead of racing.
+    void requestPrevious() {
+        queueExecutor.execute(() -> {
+            long pos = currentPositionBlocking();
+            if (pos > 3000) {
+                main.post(() -> {
+                    ExoPlayer player = currentPlayer();
+                    if (player != null) player.seekTo(0); // restart current track, like most players
+                });
+            } else {
+                resolveAndLoad(-1, MAX_QUEUE_ADVANCE_RETRIES);
+            }
+        });
+    }
+
+    private void advanceQueue(int delta) {
+        queueExecutor.execute(() -> resolveAndLoad(delta, MAX_QUEUE_ADVANCE_RETRIES));
+    }
+
+    // ExoPlayer enforces same-thread (main) access -- called only from
+    // queueExecutor, so this hops to main and blocks briefly waiting for the
+    // answer rather than racing it.
+    private long currentPositionBlocking() {
+        CountDownLatch latch = new CountDownLatch(1);
+        long[] result = {-1};
+        main.post(() -> {
+            ExoPlayer player = currentPlayer();
+            result[0] = player != null ? player.getCurrentPosition() : -1;
+            latch.countDown();
+        });
+        try {
+            latch.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return result[0];
+    }
+
+    // Runs on queueExecutor -- resolving a download URL is a blocking network
+    // call. Handles both an explicit Next/Previous (delta=±1, and the single
+    // retry step after dropping a 404'd track uses delta=0 since `qm` is
+    // already sitting on the next candidate) and natural track-end.
+    private void resolveAndLoad(int delta, int attemptsLeft) {
+        NativeQueueManager qm = NativeQueueManager.getInstance(getContext());
+        if (attemptsLeft <= 0 || !qm.advance(delta)) return;
+        NativeQueueManager.TrackDescriptor track = qm.getCurrentTrack();
+        if (track == null) return;
+        try {
+            String url = NativeGraphClient.resolveDownloadUrl(getContext(), track.id);
+            int position = qm.getPosition();
+            main.post(() -> loadResolvedTrack(track, url, position));
+        } catch (NativeGraphClient.ItemGoneException e) {
+            JSObject data = new JSObject();
+            data.put("itemId", track.id);
+            notifyListeners("itemUnavailable", data);
+            qm.removeAt(qm.getPosition());
+            resolveAndLoad(0, attemptsLeft - 1);
+        } catch (Exception e) {
+            JSObject data = new JSObject();
+            data.put("message", e.getMessage());
+            notifyListeners("error", data);
+        }
+    }
+
+    private void loadResolvedTrack(NativeQueueManager.TrackDescriptor track, String url, int position) {
+        ExoPlayer player = currentPlayer();
+        if (player == null) return;
+        attachListenerIfNeeded(player);
+        MediaMetadata metadata = new MediaMetadata.Builder()
+                .setTitle(track.name)
+                .setArtist(track.artist)
+                .build();
+        MediaItem item = new MediaItem.Builder().setUri(url).setMediaMetadata(metadata).build();
+        player.setMediaItem(item, 0);
+        player.prepare();
+        player.play();
+        // UI-sync only (see js/player/nativeQueueSync.js) -- never blocks the
+        // actual swap above, which has already happened by the time this fires.
+        JSObject data = new JSObject();
+        data.put("itemId", track.id);
+        data.put("position", position);
+        data.put("name", track.name);
+        data.put("artist", track.artist);
+        notifyListeners("trackChanged", data);
+    }
+
+    // Native rotated the refresh token on its own (a Graph call while the
+    // WebView was frozen needed a refresh) -- keeps JS's own localStorage
+    // copy in sync. See auth.js's "nativeAuthTokensUpdated" listener.
+    void notifyAuthTokensUpdated(String accessToken, String refreshToken, long expiresAt) {
+        JSObject data = new JSObject();
+        data.put("accessToken", accessToken);
+        data.put("refreshToken", refreshToken);
+        data.put("expiresAt", (double) expiresAt);
+        notifyListeners("nativeAuthTokensUpdated", data);
     }
 
     @PluginMethod
@@ -275,6 +411,72 @@ public class NativePlayerPlugin extends Plugin {
         call.resolve();
     }
 
+    // In-app Next/Previous taps reach the exact same code (requestNext()/
+    // requestPrevious()) hardware/notification presses do via
+    // QueueAwarePlayer -- see this class's own comment on why.
+    @PluginMethod
+    public void next(PluginCall call) {
+        requestNext();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void previous(PluginCall call) {
+        requestPrevious();
+        call.resolve();
+    }
+
+    // Pushed by js/player/nativeQueueSync.js on every queue mutation
+    // (setQueue/addToQueue/toggleShuffle/playIndex/setUpcomingOrder) --
+    // `tracks` is already the flattened play order, never raw shuffle state.
+    @PluginMethod
+    public void setQueue(PluginCall call) {
+        JSArray tracksArray = call.getArray("tracks");
+        int position = (int) Math.round(call.getDouble("position", -1.0));
+        String repeatMode = call.getString("repeatMode", "off");
+        List<NativeQueueManager.TrackDescriptor> tracks = new ArrayList<>();
+        if (tracksArray != null) {
+            try {
+                for (int i = 0; i < tracksArray.length(); i++) {
+                    JSONObject t = tracksArray.getJSONObject(i);
+                    tracks.add(new NativeQueueManager.TrackDescriptor(
+                            t.getString("id"),
+                            t.optString("name", ""),
+                            t.optString("artist", "")
+                    ));
+                }
+            } catch (JSONException e) {
+                call.reject("Invalid tracks array", e);
+                return;
+            }
+        }
+        NativeQueueManager.getInstance(getContext()).setQueue(tracks, position, repeatMode);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setRepeatMode(PluginCall call) {
+        NativeQueueManager.getInstance(getContext()).setRepeatMode(call.getString("repeatMode", "off"));
+        call.resolve();
+    }
+
+    // Pushed by js/data/auth.js at sign-in, after a JS-side refresh, and once
+    // at startup -- see NativeAuthClient's javadoc-style comment.
+    @PluginMethod
+    public void setAuthTokens(PluginCall call) {
+        String accessToken = call.getString("accessToken");
+        String refreshToken = call.getString("refreshToken");
+        long expiresAt = Math.round(call.getDouble("expiresAt", 0.0));
+        NativeAuthClient.getInstance(getContext()).setTokens(accessToken, refreshToken, expiresAt);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearAuthTokens(PluginCall call) {
+        NativeAuthClient.getInstance(getContext()).clearTokens();
+        call.resolve();
+    }
+
     // Updates the currently-loaded item's metadata (title/artist/album) once
     // the real ID3 tags resolve, without restarting playback or losing
     // position -- ExoPlayer's replaceMediaItem() is specifically designed to
@@ -319,6 +521,10 @@ public class NativePlayerPlugin extends Plugin {
             data.put("playing", player != null && player.isPlaying());
             data.put("positionMs", player != null ? player.getCurrentPosition() : 0);
             data.put("durationMs", player != null ? player.getDuration() : 0);
+            NativeQueueManager qm = NativeQueueManager.getInstance(getContext());
+            NativeQueueManager.TrackDescriptor track = qm.getCurrentTrack();
+            data.put("queuePosition", qm.getPosition());
+            if (track != null) data.put("itemId", track.id);
             call.resolve(data);
         });
     }

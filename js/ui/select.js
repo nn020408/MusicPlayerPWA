@@ -127,6 +127,17 @@ export function exitSelectMode() {
   el.selectActionBar.classList.add("hidden");
 }
 
+// Belt-and-suspenders for setupLongPress()'s pointerdown->pointerup/leave/
+// cancel pairing above: a touch interrupted by the screen locking or the app
+// backgrounding mid-press doesn't reliably fire any of those three events on
+// Android WebView, leaving a row stuck mid-sweep (row.pressing's ::before
+// overlay, fully filled, forever) until the folder is reloaded. Confirmed as
+// a real, reported symptom — a folder row stuck with a persistent tint.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "hidden") return;
+  document.querySelectorAll(".row.pressing, .row.press-cancel").forEach((r) => r.classList.remove("pressing", "press-cancel"));
+});
+
 el.selectToggleBtn.addEventListener("click", () => {
   if (selectMode) exitSelectMode();
   else enterSelectMode();

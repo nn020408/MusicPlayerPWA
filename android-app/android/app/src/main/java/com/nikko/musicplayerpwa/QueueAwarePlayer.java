@@ -5,15 +5,20 @@ import androidx.media3.common.Player;
 
 // Wraps the real ExoPlayer for the ONE purpose of making next/previous
 // (notification taps, hardware/Bluetooth media buttons) actually do
-// something. The real queue lives in JS (js/player/player.js's queue/
-// playOrder) — ExoPlayer itself only ever has ONE MediaItem loaded at a
-// time (see NativePlayerPlugin.load()), so by default it has no next/
-// previous item to advance to at all: Player.hasNextMediaItem()/
-// hasPreviousMediaItem() are always false, seekToNext()/seekToPrevious()
-// are correctly-but-uselessly no-ops, and (confirmed on-device) the
-// notification's Next button does nothing when tapped despite having a
-// real, working PendingIntent -- the command reaches the player just fine,
-// the player just has nowhere to go.
+// something. ExoPlayer itself only ever has ONE MediaItem loaded at a time
+// (see NativePlayerPlugin.load()), so by default Player.hasNextMediaItem()/
+// hasPreviousMediaItem() are always false and seekToNext()/seekToPrevious()
+// are correctly-but-uselessly no-ops.
+//
+// Delegates to NativePlayerPlugin.requestNext()/requestPrevious() -- the
+// SAME methods the in-app Next/Previous buttons reach via the next()/
+// previous() plugin calls (see js/player/player.js's playNext()/
+// playPrevious()) -- so there is exactly one implementation of "what does
+// Next/Previous mean" (repeat-all wraparound, restart-if-more-than-3s-in),
+// not two that could silently drift apart. Earlier versions of this class
+// forwarded the raw action to JS instead (notifyRemoteAction) -- replaced
+// because that still depended on the WebView being unfrozen to do anything;
+// see the architecture plan (native queue + Graph migration) for why.
 //
 // This wrapper is used ONLY to build the MediaSession (see PlaybackService.
 // onCreate()) -- NativePlayerPlugin's own load()/play()/pause()/seekTo()/
@@ -45,30 +50,31 @@ class QueueAwarePlayer extends ForwardingPlayer {
 
     @Override
     public void seekToNext() {
-        notifyRemote("next");
+        requestNext();
     }
 
     @Override
     public void seekToNextMediaItem() {
-        notifyRemote("next");
+        requestNext();
     }
 
     @Override
     public void seekToPrevious() {
-        notifyRemote("previous");
+        requestPrevious();
     }
 
     @Override
     public void seekToPreviousMediaItem() {
-        notifyRemote("previous");
+        requestPrevious();
     }
 
-    // Deliberately does NOT touch the underlying ExoPlayer at all -- the
-    // actual track swap happens the same way auto-advance already does: JS
-    // resolves the next/previous track's URL from its own queue and calls
-    // NativePlayerPlugin.load() again.
-    private void notifyRemote(String action) {
+    private void requestNext() {
         NativePlayerPlugin plugin = NativePlayerPlugin.getInstance();
-        if (plugin != null) plugin.notifyRemoteAction(action);
+        if (plugin != null) plugin.requestNext();
+    }
+
+    private void requestPrevious() {
+        NativePlayerPlugin plugin = NativePlayerPlugin.getInstance();
+        if (plugin != null) plugin.requestPrevious();
     }
 }

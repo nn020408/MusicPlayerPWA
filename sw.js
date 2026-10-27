@@ -2,7 +2,7 @@
 // We deliberately do NOT cache audio or Graph API responses since this app
 // is streaming-only by design (no offline playback).
 
-const CACHE_NAME = "musicplayer-shell-v161";
+const CACHE_NAME = "musicplayer-shell-v162";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -27,6 +27,7 @@ const SHELL_FILES = [
   "./js/main.js",
   "./js/player/carMediaSession.js",
   "./js/player/nativeAudioElement.js",
+  "./js/player/nativeQueueSync.js",
   "./js/player/player.js",
   "./js/player/prefetch.js",
   "./js/state/browse.js",

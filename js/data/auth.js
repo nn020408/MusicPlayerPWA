@@ -131,6 +131,16 @@ function getStoredNativeTokens() {
 
 function storeNativeTokens(tokens) {
   localStorage.setItem(NATIVE_TOKEN_KEY, JSON.stringify(tokens));
+  pushTokensToNative(tokens);
+}
+
+// Keeps NativeAuthClient.java's own copy in sync, so Next/Previous/
+// auto-advance's native Graph calls (see the architecture plan) have a
+// refresh token to work with even while the WebView is frozen. Called here
+// (sign-in, every JS-side refresh) and once at startup in nativeInitAuth().
+function pushTokensToNative(tokens) {
+  const plugin = isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
+  if (plugin) plugin.setAuthTokens(tokens);
 }
 
 // Routed through native networking (see file-header comment) rather than
@@ -157,6 +167,8 @@ function tokensFromResponse(data) {
 }
 
 async function nativeInitAuth() {
+  const tokens = getStoredNativeTokens();
+  if (tokens) pushTokensToNative(tokens);
   return nativeGetActiveAccount();
 }
 
@@ -226,6 +238,16 @@ if (isNative()) {
 
 function nativeSignOut() {
   localStorage.removeItem(NATIVE_TOKEN_KEY);
+  const plugin = isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
+  if (plugin) plugin.clearAuthTokens();
+}
+
+// Native rotated the refresh token on its own (a Graph call for Next/
+// Previous/auto-advance needed a refresh while the WebView was frozen) —
+// keeps this copy in sync. See NativeAuthClient.java's notifyAuthTokensUpdated().
+if (isNative()) {
+  const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
+  if (plugin) plugin.addListener("nativeAuthTokensUpdated", (tokens) => storeNativeTokens(tokens));
 }
 
 // Shared by every concurrent caller so a burst of Graph requests near expiry
