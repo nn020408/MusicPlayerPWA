@@ -8,7 +8,7 @@ import { el } from "../core/dom.js";
 import { clearFolderListCache, deleteItem } from "../data/graph.js";
 import { forgetTrack } from "../data/library.js";
 import { removeTrackFromAllPlaylists, removeTrackFromPlaylist } from "../data/playlists.js";
-import { currentTrack, playNext } from "../player/player.js";
+import { currentTrack, getUpcomingTracks, playNext, resetPlayer } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { showToast } from "./toast.js";
 
@@ -18,6 +18,21 @@ let pendingOnRemovedFromPlaylist = null;
 let pendingOnDeleted = null;
 
 const titleOf = (track) => track.name.replace(/\.[^/.]+$/, "");
+
+// Every list that shows songs (folder view, search, playlist/artist detail,
+// Up Next) tags its rows via trackRow.js's row.dataset.trackId -- removing by
+// that, document-wide, cleans up a deleted song wherever it's currently
+// rendered without this module needing to know which list is actually on
+// screen. Needed specifically because the full player's trash icon isn't
+// tied to any one list (unlike the ⋮ menu's own onDeleted callback, which
+// each list already wires up for itself) -- confirmed as a real gap: deleting
+// a song from the full player left its row sitting in whatever list was open
+// underneath until that list happened to reload on its own.
+function removeTrackRowEverywhere(trackId) {
+  document.querySelectorAll(".track-row").forEach((row) => {
+    if (row.dataset.trackId === trackId) row.remove();
+  });
+}
 
 // playlistId (optional): shows "Remove from this playlist" — only makes
 // sense when the menu was opened from that playlist's own song list.
@@ -53,37 +68,29 @@ el.trackRemovePlaylistBtn.addEventListener("click", () => {
   }
 });
 
-// How long the delete-confirm button stays disabled after the dialog opens —
-// long enough that a real person reading the prompt clears it without even
-// noticing, short enough not to feel like a deliberate delay. A plain
-// confirm() used to let a phone unlocked in a pocket chain two accidental
-// taps (trash icon, then confirm) into an actual, irreversible OneDrive
-// delete; this makes the second tap land before the button can respond to it.
-const DELETE_CONFIRM_DELAY_MS = 1500;
-
 let pendingDeleteCancel = null; // set while the dialog is open, lets backButton.js dismiss it as Cancel
 
+// A fresh random 2-digit code shown on every open, which has to be typed in
+// before the Delete button enables -- a plain confirm() (and, before that, a
+// timed delay) used to let a phone unlocked in a pocket chain two accidental
+// taps (trash icon, then confirm) into an actual, irreversible OneDrive
+// delete. Typing a number it's never shown isn't something a pocket can do.
 function showDeleteConfirm(name) {
+  const code = String(10 + Math.floor(Math.random() * 90)); // always 2 digits (10-99)
   el.deleteConfirmMessage.textContent = `Delete "${name}" from OneDrive? This can't be undone.`;
-  el.deleteConfirmModal.classList.remove("hidden");
+  el.deleteConfirmCode.textContent = code;
+  el.deleteConfirmInput.value = "";
   el.deleteConfirmBtn.disabled = true;
-  el.deleteConfirmBtn.textContent = `🗑 Delete from OneDrive (${Math.ceil(DELETE_CONFIRM_DELAY_MS / 1000)})`;
+  el.deleteConfirmModal.classList.remove("hidden");
+  el.deleteConfirmInput.focus();
   return new Promise((resolve) => {
-    const deadline = Date.now() + DELETE_CONFIRM_DELAY_MS;
-    const tick = setInterval(() => {
-      const secondsLeft = Math.ceil((deadline - Date.now()) / 1000);
-      if (secondsLeft <= 0) {
-        clearInterval(tick);
-        el.deleteConfirmBtn.disabled = false;
-        el.deleteConfirmBtn.textContent = "🗑 Delete from OneDrive";
-      } else {
-        el.deleteConfirmBtn.textContent = `🗑 Delete from OneDrive (${secondsLeft})`;
-      }
-    }, 200);
+    const onInput = () => {
+      el.deleteConfirmBtn.disabled = el.deleteConfirmInput.value !== code;
+    };
     const settle = (result) => {
-      clearInterval(tick);
       pendingDeleteCancel = null;
       el.deleteConfirmModal.classList.add("hidden");
+      el.deleteConfirmInput.removeEventListener("input", onInput);
       el.deleteConfirmBtn.removeEventListener("click", onConfirm);
       el.deleteConfirmCancelBtn.removeEventListener("click", onCancel);
       resolve(result);
@@ -91,15 +98,15 @@ function showDeleteConfirm(name) {
     const onConfirm = () => settle(true);
     const onCancel = () => settle(false);
     pendingDeleteCancel = onCancel;
+    el.deleteConfirmInput.addEventListener("input", onInput);
     el.deleteConfirmBtn.addEventListener("click", onConfirm);
     el.deleteConfirmCancelBtn.addEventListener("click", onCancel);
   });
 }
 
 // Lets backButton.js dismiss an open delete-confirm dialog the same way it
-// dismisses every other modal, instead of leaving its Promise unresolved
-// (and its countdown timer running) if the hardware/gesture back button is
-// pressed while it's open.
+// dismisses every other modal, instead of leaving its Promise unresolved if
+// the hardware/gesture back button is pressed while it's open.
 export function cancelPendingDeleteConfirm() {
   if (pendingDeleteCancel) pendingDeleteCancel();
 }
@@ -125,11 +132,25 @@ export async function deleteTrackWithConfirm(track, { onDeleted } = {}) {
   forgetTrack(track.id);
   removeTrackFromAllPlaylists(track.id);
   clearFolderListCache(); // otherwise a folder reload would just show the deleted file again
+  removeTrackRowEverywhere(track.id);
   showToast(`Deleted "${name}"`);
-  // If it's what's playing right now, move on rather than leave a dead
-  // download link queued up — same recovery path as the 404-during-playback
-  // case, which already handles this correctly.
-  if (currentTrack() && currentTrack().id === track.id) playNext();
+  // If it's what's playing right now, move on -- but only if there's
+  // actually somewhere to move to. On native, playNext() just advances
+  // native's own queue POINTER; with nothing after it (a single song, or
+  // the last one with repeat off), native has nothing left to load and
+  // just leaves the already-playing (now-deleted) file running untouched.
+  // Confirmed on-device as a real bug without this check: the song kept
+  // audibly playing, the UI never updated, and the same dead row was still
+  // sitting there to "delete" again (which Graph silently no-ops on a
+  // repeat 404, so nothing about it looked wrong until you knew to check).
+  if (currentTrack() && currentTrack().id === track.id) {
+    if (getUpcomingTracks(1).length > 0) {
+      playNext();
+    } else {
+      resetPlayer();
+      el.nowPlayingBar.classList.add("hidden");
+    }
+  }
   onDeleted && onDeleted();
 }
 

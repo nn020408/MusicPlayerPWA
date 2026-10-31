@@ -437,16 +437,17 @@
     </div>
   </div>
 
-  <!-- Delete-from-OneDrive confirmation. The Delete button starts disabled
-       and only enables after a short delay (see trackActions.js) so an
-       accidental double-tap -- a phone unlocked in a pocket hitting the
-       trash icon and then this dialog in quick succession -- can't actually
-       delete anything; a real person reading the prompt clears it easily. -->
+  <!-- Delete-from-OneDrive confirmation. A fresh random 2-digit code is shown
+       each time, and the Delete button stays disabled until it's typed in
+       (see trackActions.js) -- a phone unlocked in a pocket chaining the
+       trash icon and a confirm tap can't type a number it's never shown. -->
   <div id="delete-confirm-modal" class="modal hidden">
     <div class="modal-box">
       <h3>Delete from OneDrive?</h3>
       <p id="delete-confirm-message"></p>
-      <button id="delete-confirm-btn" class="secondary-btn danger" disabled></button>
+      <p>Type <strong id="delete-confirm-code"></strong> to confirm:</p>
+      <input id="delete-confirm-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" placeholder="00" />
+      <button id="delete-confirm-btn" class="secondary-btn danger" disabled>🗑 Delete from OneDrive</button>
       <button id="delete-confirm-cancel-btn" class="text-btn">Cancel</button>
     </div>
   </div>

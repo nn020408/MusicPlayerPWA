@@ -25,16 +25,26 @@ const check = (name, ok, detail = "") => {
   const titles = () => JSON.parse(window.localStorage.getItem("libraryIndexCache")).tracks.map((t) => t.name);
   const hidden = (sel) => $(sel).classList.contains("hidden");
 
+  const setInput = (sel, value) => {
+    $(sel).value = value;
+    $(sel).dispatchEvent(new window.Event("input"));
+  };
+
   // Assumes a delete trigger (the ⋮ menu's Delete, or the full player's
   // trash icon) was just clicked, opening the delete-confirm dialog (see
-  // trackActions.js). Waits out its short confirm delay and clicks through.
+  // trackActions.js). Reads the random code it shows, types the wrong thing
+  // first to confirm that's rejected, then types the real code and confirms.
   const confirmDelete = async () => {
     await sleep(50);
+    const code = $("#delete-confirm-code").textContent;
+    check("a 2-digit code is shown", /^\d{2}$/.test(code), code);
     $("#delete-confirm-btn").click(); // disabled -- a browser no-ops a click on a disabled button
-    await sleep(100);
-    check("delete stays blocked until the confirm delay elapses", !hidden("#delete-confirm-modal"));
-    await sleep(1600);
-    check("delete button enables once the delay elapses", !$("#delete-confirm-btn").disabled);
+    await sleep(50);
+    check("delete stays blocked with nothing typed", !hidden("#delete-confirm-modal"));
+    setInput("#delete-confirm-input", code === "00" ? "01" : "00"); // deliberately wrong
+    check("the wrong code leaves it disabled", $("#delete-confirm-btn").disabled);
+    setInput("#delete-confirm-input", code);
+    check("the right code enables it", !$("#delete-confirm-btn").disabled);
     $("#delete-confirm-btn").click();
   };
 
@@ -97,6 +107,7 @@ const check = (name, ok, detail = "") => {
   await sleep(300);
   check("deleting the playing song moves on to another one", /Hips Don't Lie/.test($("#now-playing-title").textContent), $("#now-playing-title").textContent);
   check("it's gone from the library cache too", !titles().includes("Baila Conmigo.mp3"));
+  check("its row also disappears from the folder view sitting underneath the full player", !$$("#file-list .track-row").find((r) => r.textContent.includes("Baila Conmigo")));
 
   // ---- deleting a song also drops it from any playlist it was added to
   $("#full-player-close-btn").click();
@@ -121,6 +132,28 @@ const check = (name, ok, detail = "") => {
   await sleep(300);
   const afterDelete = JSON.parse(window.localStorage.getItem("playlists") || "[]").find((p) => p.name === "Road Trip");
   check("deleting it drops it from the playlist too", !!afterDelete && !afterDelete.tracks.some((t) => t.name === "Pedro Navaja.mp3"), JSON.stringify(afterDelete && afterDelete.tracks));
+
+  // ---- deleting the only song in a one-song folder (nothing to advance to,
+  // repeat off) stops playback outright instead of leaving the just-deleted
+  // file running -- confirmed on-device as a real bug without this: native
+  // just advances its queue pointer, and with nothing after it, leaves
+  // whatever was already playing untouched.
+  $$("#breadcrumb .crumb")[0].click();
+  await sleep(200);
+  $$("#file-list .folder-row").find((r) => r.textContent.includes("Rock")).click();
+  await sleep(300);
+  $$("#file-list .folder-row").find((r) => r.textContent.includes("Live")).click();
+  await sleep(300);
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Yesterday")).click();
+  await sleep(300);
+  check("setup: Yesterday (Live) is now playing, alone in its folder", /Yesterday/.test($("#now-playing-title").textContent));
+  $("#now-playing-bar .np-title").click();
+  await sleep(100);
+  $("#full-player-delete-btn").click();
+  await confirmDelete();
+  await sleep(300);
+  check("playback stops outright instead of leaving the deleted song running", hidden("#now-playing-bar"));
+  check("it's gone from the library cache", !titles().includes("Yesterday (Live).mp3"));
 
   await app.stop();
   process.exit(bad ? 1 : 0);

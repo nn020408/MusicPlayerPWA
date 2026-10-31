@@ -821,8 +821,22 @@ body.settings-open #now-playing-bar { display: none; }
 }
 .modal-box h3 { margin: 0 0 12px; }
 .modal-box #add-playlist-list { overflow-y: auto; flex: 1; margin-bottom: 12px; }
-#delete-confirm-message { margin: 0 0 16px; line-height: 1.4; }
-/* Visibly inert while the delete-confirm delay runs (see trackActions.js) --
+#delete-confirm-message { margin: 0 0 8px; line-height: 1.4; }
+#delete-confirm-code { font-size: 20px; letter-spacing: 2px; color: var(--danger); }
+#delete-confirm-input {
+  width: 100%;
+  background: var(--surface);
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  color: var(--text);
+  font-size: 20px;
+  letter-spacing: 2px;
+  text-align: center;
+  box-sizing: border-box;
+}
+/* Visibly inert until the typed code matches (see trackActions.js) --
    without this, a disabled .secondary-btn.danger looked identical to an
    enabled one against its own custom colors. */
 .secondary-btn:disabled { opacity: 0.4; cursor: not-allowed; }

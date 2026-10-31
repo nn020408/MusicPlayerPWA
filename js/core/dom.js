@@ -160,6 +160,8 @@ export const el = {
 
   deleteConfirmModal: document.getElementById("delete-confirm-modal"),
   deleteConfirmMessage: document.getElementById("delete-confirm-message"),
+  deleteConfirmCode: document.getElementById("delete-confirm-code"),
+  deleteConfirmInput: document.getElementById("delete-confirm-input"),
   deleteConfirmBtn: document.getElementById("delete-confirm-btn"),
   deleteConfirmCancelBtn: document.getElementById("delete-confirm-cancel-btn"),
 
