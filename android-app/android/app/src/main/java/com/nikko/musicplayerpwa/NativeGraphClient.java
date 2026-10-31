@@ -38,6 +38,17 @@ class NativeGraphClient {
                 return resolveOnce(context, itemId);
             } catch (ItemGoneException e) {
                 throw e; // not retryable, same as graph.js's shouldRetry
+            } catch (NativeAuthClient.TokenRejectedException e) {
+                // Not retryable: NativeAuthClient already cleared the dead
+                // token, so a retry here would just send the identical
+                // rejected request again -- precisely the pattern that got
+                // this flagged as a "client request loop" by Microsoft's own
+                // server (AADSTS50196) and made WORSE by retrying. Fail
+                // immediately so JS's own nativeGetAccessToken() (which
+                // already does this correctly -- clears its token and asks
+                // for sign-in) gets a chance to recover instead of this loop
+                // burning through all 8 attempts first.
+                throw e;
             } catch (IOException e) {
                 lastError = e;
                 if (attempt == maxAttempts - 1) break;

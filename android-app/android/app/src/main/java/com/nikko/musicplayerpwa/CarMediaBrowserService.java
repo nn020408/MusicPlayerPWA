@@ -42,7 +42,11 @@ public class CarMediaBrowserService extends MediaBrowserServiceCompat {
     private static final String TAG = "CarMediaBrowserService";
     private static final String ROOT_ID = "root";
 
-    private static MediaSessionCompat session;
+    // volatile for cross-thread visibility (onDestroy() runs on the main
+    // thread, updateMetadata()/updatePlaybackState() on Capacitor's plugin
+    // thread) -- but visibility alone isn't enough: see those methods' own
+    // comment for why they snapshot this into a local before checking it.
+    private static volatile MediaSessionCompat session;
 
     @Override
     public void onCreate() {
@@ -80,8 +84,14 @@ public class CarMediaBrowserService extends MediaBrowserServiceCompat {
     // Called by CarMediaSessionPlugin (fed from JS) whenever the real
     // playback metadata/state changes.
     static void updateMetadata(String title, String artist, String album, long durationMs) {
-        if (session == null) return;
-        session.setMetadata(new MediaMetadataCompat.Builder()
+        // Snapshotted into a local rather than checked-then-used directly --
+        // onDestroy() (main thread) can null the field between the check and
+        // the call on this thread (Capacitor's plugin thread); the field
+        // itself can't change out from under a local copy, so this is the
+        // only way to make the null-check actually mean something here.
+        MediaSessionCompat s = session;
+        if (s == null) return;
+        s.setMetadata(new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
@@ -90,9 +100,10 @@ public class CarMediaBrowserService extends MediaBrowserServiceCompat {
     }
 
     static void updatePlaybackState(boolean playing, long positionMs) {
-        if (session == null) return;
+        MediaSessionCompat s = session; // see updateMetadata()'s own comment
+        if (s == null) return;
         int state = playing ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED;
-        session.setPlaybackState(new PlaybackStateCompat.Builder()
+        s.setPlaybackState(new PlaybackStateCompat.Builder()
                 .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE
                         | PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_SKIP_TO_NEXT
                         | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)

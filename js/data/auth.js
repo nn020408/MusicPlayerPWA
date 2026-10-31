@@ -129,15 +129,27 @@ function getStoredNativeTokens() {
   }
 }
 
+// Only for a token JS itself originated (sign-in) -- native doesn't have
+// this one yet, so it needs pushing. For a token that came FROM native
+// (its own refresh, or NativePlayer.getAccessToken()'s result), use
+// cacheNativeTokensLocally() instead: echoing it straight back here used to
+// corrupt native's own copy (confirmed on-device -- every echo-back
+// overwrote NativeAuthClient's correct ~1hr expiresAt with one that read as
+// already-expired, forcing it to refresh again on literally the next check,
+// forever, which is what made Next/Previous feel permanently broken even
+// after the dual-refresh race itself was fixed). Native is always the
+// source of truth for its own tokens; it never needs reminding.
 function storeNativeTokens(tokens) {
-  localStorage.setItem(NATIVE_TOKEN_KEY, JSON.stringify(tokens));
+  cacheNativeTokensLocally(tokens);
   pushTokensToNative(tokens);
 }
 
-// Keeps NativeAuthClient.java's own copy in sync, so Next/Previous/
-// auto-advance's native Graph calls (see the architecture plan) have a
-// refresh token to work with even while the WebView is frozen. Called here
-// (sign-in, every JS-side refresh) and once at startup in nativeInitAuth().
+// localStorage only -- see storeNativeTokens's own comment for why this is
+// the one to use for anything that already came from native.
+function cacheNativeTokensLocally(tokens) {
+  localStorage.setItem(NATIVE_TOKEN_KEY, JSON.stringify(tokens));
+}
+
 function pushTokensToNative(tokens) {
   const plugin = isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
   if (plugin) plugin.setAuthTokens(tokens);
@@ -236,7 +248,15 @@ if (isNative()) {
   });
 }
 
+// Bumped on sign-out, checked before a refresh that was already in flight at
+// that moment writes its result back to localStorage -- without this, a
+// refresh racing a sign-out could land right after nativeSignOut() cleared
+// NATIVE_TOKEN_KEY and silently resurrect it, leaving the app looking signed
+// in again with tokens native itself just discarded.
+let authGeneration = 0;
+
 function nativeSignOut() {
+  authGeneration++;
   localStorage.removeItem(NATIVE_TOKEN_KEY);
   const plugin = isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
   if (plugin) plugin.clearAuthTokens();
@@ -245,9 +265,21 @@ function nativeSignOut() {
 // Native rotated the refresh token on its own (a Graph call for Next/
 // Previous/auto-advance needed a refresh while the WebView was frozen) —
 // keeps this copy in sync. See NativeAuthClient.java's notifyAuthTokensUpdated().
+// Local cache only (see storeNativeTokens's comment) -- native already has
+// this exact value, it's who sent it.
 if (isNative()) {
   const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
-  if (plugin) plugin.addListener("nativeAuthTokensUpdated", (tokens) => storeNativeTokens(tokens));
+  if (plugin) plugin.addListener("nativeAuthTokensUpdated", (tokens) => cacheNativeTokensLocally(tokens));
+}
+
+// Native gave up on the tokens (Microsoft rejected a refresh) -- without
+// this, this copy kept trusting its own cached expiresAt (up to ~55 more
+// minutes) even though native had already discarded the same tokens and
+// would reject any further use of them. See NativeAuthClient's
+// TokenRejectedException / notifyAuthTokensCleared().
+if (isNative()) {
+  const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
+  if (plugin) plugin.addListener("nativeAuthTokensCleared", () => localStorage.removeItem(NATIVE_TOKEN_KEY));
 }
 
 // Shared by every concurrent caller so a burst of Graph requests near expiry
@@ -258,23 +290,32 @@ if (isNative()) {
 // though the first one actually succeeded, forcing a spurious full sign-out.
 let refreshPromise = null;
 
-async function nativeGetAccessToken() {
+// force bypasses the "still fresh by our own clock" shortcut -- for a caller
+// who just got a 401 from Graph itself using this exact cached token, which
+// this clock-based check alone can never catch (see graph.js's graphGet()).
+async function nativeGetAccessToken(force) {
   const tokens = getStoredNativeTokens();
   if (!tokens) throw new Error("Not signed in");
-  if (tokens.expiresAt - 60000 > Date.now()) return tokens.accessToken;
+  if (!force && tokens.expiresAt - 60000 > Date.now()) return tokens.accessToken;
 
   if (refreshPromise) return refreshPromise;
+  const myGeneration = authGeneration;
   refreshPromise = (async () => {
     try {
-      const data = await tokenEndpointRequest({
-        client_id: APP_CONFIG.clientId,
-        grant_type: "refresh_token",
-        refresh_token: tokens.refreshToken,
-        scope: APP_CONFIG.scopes.join(" "),
-      });
-      const fresh = tokensFromResponse(data);
-      if (!fresh.refreshToken) fresh.refreshToken = tokens.refreshToken; // refresh response may omit it, keep the one we have
-      storeNativeTokens(fresh);
+      // Routed through native's own NativeAuthClient instead of POSTing the
+      // refresh grant here directly -- this used to run its own independent
+      // refresh, racing native's (NativePlayerPlugin.resolveAndLoad() needs
+      // one too, for Next/Previous/auto-advance). Two uncoordinated refreshes
+      // of the same rotating token within the same second or two is exactly
+      // what got this account's login rejected by Microsoft as a "client
+      // request loop" (AADSTS50196) -- confirmed on-device, not theoretical.
+      // Native's own single-flight guard (NativeAuthClient.getAccessToken()
+      // is `synchronized`) now covers both call sites because there's only
+      // one implementation left to call.
+      const fresh = await window.Capacitor.Plugins.NativePlayer.getAccessToken({ force });
+      // Don't resurrect tokens in localStorage if sign-out happened while
+      // this was in flight -- see authGeneration's own comment.
+      if (myGeneration === authGeneration) cacheNativeTokensLocally(fresh);
       return fresh.accessToken;
     } catch (err) {
       localStorage.removeItem(NATIVE_TOKEN_KEY);
@@ -304,6 +345,8 @@ export function signOut() {
   return isNative() ? nativeSignOut() : webSignOut();
 }
 
-export function getAccessToken() {
-  return isNative() ? nativeGetAccessToken() : webGetAccessToken();
+// force: see nativeGetAccessToken's own comment. Not needed on web -- MSAL
+// already reacts to a 401 as part of its own token-acquisition flow.
+export function getAccessToken(force) {
+  return isNative() ? nativeGetAccessToken(force) : webGetAccessToken();
 }

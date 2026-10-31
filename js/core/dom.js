@@ -158,6 +158,11 @@ export const el = {
   trackDeleteBtn: document.getElementById("track-delete-btn"),
   trackActionsCancelBtn: document.getElementById("track-actions-cancel-btn"),
 
+  deleteConfirmModal: document.getElementById("delete-confirm-modal"),
+  deleteConfirmMessage: document.getElementById("delete-confirm-message"),
+  deleteConfirmBtn: document.getElementById("delete-confirm-btn"),
+  deleteConfirmCancelBtn: document.getElementById("delete-confirm-cancel-btn"),
+
   upNextOverlay: document.getElementById("up-next-overlay"),
   upNextCloseBtn: document.getElementById("up-next-close-btn"),
   upNextNowLabel: document.getElementById("up-next-now-label"),

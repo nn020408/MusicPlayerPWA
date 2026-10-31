@@ -38,14 +38,48 @@ export function syncNativeRepeatMode(repeatMode) {
   if (p) p.setRepeatMode({ repeatMode });
 }
 
+// A Next/Previous tap on native normally lands (via prefetch) well under this,
+// so routine skips never show anything -- only a genuinely slow one (a
+// stalled connection needing its own retry-with-backoff inside
+// NativeGraphClient, confirmed on-device as a real cause of several-second
+// gaps) does. Without this, that wait looked indistinguishable from the
+// button doing nothing at all, which is exactly what it was reported as.
+// onStatus is passed in rather than imported (same reason as
+// initNativeQueueSync's applyTrackChange param) -- it's player.js's own
+// player.onStatus, read at call time since playerUI.js assigns it after
+// player.js finishes loading.
+const SLOW_ADVANCE_FEEDBACK_MS = 1200;
+let pendingAdvanceTimer = null;
+
+export function armPendingAdvanceFeedback(onStatus) {
+  clearTimeout(pendingAdvanceTimer);
+  pendingAdvanceTimer = setTimeout(() => onStatus && onStatus("Connection trouble — hang on…"), SLOW_ADVANCE_FEEDBACK_MS);
+}
+
+export function clearPendingAdvanceFeedback(onStatus) {
+  if (!pendingAdvanceTimer) return;
+  clearTimeout(pendingAdvanceTimer);
+  pendingAdvanceTimer = null;
+  onStatus && onStatus("");
+}
+
 // `applyTrackChange` is player.js's applyNativeTrackChange, passed in rather
 // than imported here to avoid a circular import (player.js imports this
-// module to call syncNativeQueue/syncNativeRepeatMode).
-export function initNativeQueueSync(applyTrackChange) {
+// module to call syncNativeQueue/syncNativeRepeatMode). `getOnStatus` is a
+// thunk for the same reason, reading player.onStatus lazily (it isn't
+// assigned until playerUI.js loads) -- just for clearPendingAdvanceFeedback
+// below.
+export function initNativeQueueSync(applyTrackChange, getOnStatus) {
   const p = plugin();
   if (!p) return;
   p.addListener("trackChanged", (data) => applyTrackChange(data));
   p.addListener("itemUnavailable", ({ itemId }) => forgetTrack(itemId));
+  // Fired for every native Next/Previous outcome that DOESN'T produce a
+  // trackChanged (a same-track restart, a queue-boundary no-op) -- without
+  // this, armPendingAdvanceFeedback's timer had nothing to ever clear it for
+  // those cases, leaving a bogus "Connection trouble" toast on screen
+  // indefinitely. Harmless if a trackChanged already cleared it first.
+  p.addListener("advanceSettled", () => clearPendingAdvanceFeedback(getOnStatus()));
 
   // Covers the gap between "native advanced" and "the event actually got
   // delivered" (e.g. the WebView was frozen at the exact moment native

@@ -5,6 +5,16 @@
 // the first actually succeeded — forcing a spurious full sign-out in an app
 // that routinely has several Graph requests in flight at once (the indexer,
 // prefetching, a folder listing).
+//
+// The actual refresh-token POST lives in native (NativeAuthClient.java) —
+// auth.js only ever calls NativePlayer.getAccessToken() and relays the
+// result, confirmed on-device as the fix for an account lockout: JS used to
+// run its own separate POST here too, and that second, uncoordinated copy
+// racing native's own refresh is what got the login flagged by Microsoft as
+// a "client request loop" (AADSTS50196). This test's own single-flight
+// guard (refreshPromise) still matters even with native doing the real
+// work — without it, 3 concurrent callers would still make 3 redundant
+// plugin calls instead of sharing 1.
 const path = require("path");
 const { pathToFileURL } = require("url");
 
@@ -27,18 +37,24 @@ globalThis.localStorage = {
 
 let postCalls = 0;
 let postDelayMs = 20; // a window a second concurrent call could race into
+let nativeShouldFail = false;
 globalThis.window = {
   location: { origin: "https://localhost", pathname: "/index.html" }, // auth.js's web-side MSAL config reads this unconditionally at module load
   Capacitor: {
     isNativePlatform: () => true,
     Plugins: {
-      CapacitorHttp: {
-        post: (opts) => new Promise((resolve) => {
+      NativePlayer: {
+        // Stands in for NativeAuthClient's own refresh — the single place
+        // the real POST happens now (see this file's header comment).
+        getAccessToken: () => new Promise((resolve, reject) => {
           setTimeout(() => {
             postCalls++;
-            resolve({ status: 200, data: { access_token: "fresh-token-" + postCalls, refresh_token: "fresh-refresh-" + postCalls, expires_in: 3600 } });
+            if (nativeShouldFail) { reject(new Error("Token refresh rejected")); return; }
+            resolve({ accessToken: "fresh-token-" + postCalls, refreshToken: "fresh-refresh-" + postCalls, expiresAt: Date.now() + 3600 * 1000 });
           }, postDelayMs);
         }),
+        addListener: () => {}, // auth.js registers the "nativeAuthTokensUpdated" listener unconditionally at module load on the native side
+        setAuthTokens: () => {}, // storeNativeTokens() echoes the fresh token back to native after every refresh
       },
       App: { addListener: () => {} }, // auth.js registers its OAuth-redirect listener unconditionally at module load on the native side
       Browser: { open: () => {}, close: () => Promise.resolve() },
@@ -69,7 +85,7 @@ globalThis.msal = { PublicClientApplication: function () { return {}; } }; // au
 
   // ---- a failed refresh clears the stored tokens and gives a clear error
   store.nativeAuthTokens = JSON.stringify({ accessToken: "stale2", refreshToken: "bad-refresh", expiresAt: Date.now() - 1000 });
-  globalThis.window.Capacitor.Plugins.CapacitorHttp.post = async () => ({ status: 400, data: { error: "invalid_grant" } });
+  nativeShouldFail = true;
   let threwExpired = false;
   try { await getAccessToken(); } catch (e) { threwExpired = /Sign-in expired/.test(e.message); }
   check("a failed refresh clears the stored tokens and says sign-in expired", threwExpired && store.nativeAuthTokens === undefined);

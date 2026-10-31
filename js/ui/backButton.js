@@ -9,6 +9,7 @@ import { handleIntroBack } from "./intro.js";
 import { closeFullPlayer } from "./playerUI.js";
 import { handleSearchBack } from "./search.js";
 import { exitSelectMode, selectMode } from "./select.js";
+import { cancelPendingDeleteConfirm } from "./trackActions.js";
 
 // A PWA has no built-in back-stack, so without this the hardware/gesture
 // back button just exits the app immediately no matter what's open. This
@@ -33,6 +34,10 @@ function handleBackPress() {
   }
   if (!el.trackActionsModal.classList.contains("hidden")) {
     el.trackActionsModal.classList.add("hidden");
+    return true;
+  }
+  if (!el.deleteConfirmModal.classList.contains("hidden")) {
+    cancelPendingDeleteConfirm(); // resolves the pending promise and hides the modal -- see trackActions.js
     return true;
   }
   if (!el.upNextOverlay.classList.contains("hidden")) {

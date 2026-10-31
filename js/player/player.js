@@ -5,17 +5,16 @@ import { isNative } from "../core/platform.js";
 import { pauseWithGrace, setWantsToPlay, wantsToPlay } from "../core/playbackIntent.js";
 import { getDownloadUrl, getThumbnailUrl, refreshDownloadUrl, retryWithBackoff } from "../data/graph.js";
 import { readId3Tags } from "../data/id3.js";
-import { forgetTrack, libraryTracks, slimTrack } from "../data/library.js";
+import { forgetTrack, libraryArtistFor, libraryTracks, slimTrack } from "../data/library.js";
 import { updateCarMetadata, updateCarPlaybackState } from "./carMediaSession.js";
 import { NativeAudioElement } from "./nativeAudioElement.js";
-import { initNativeQueueSync, syncNativeQueue, syncNativeRepeatMode } from "./nativeQueueSync.js";
+import { armPendingAdvanceFeedback, clearPendingAdvanceFeedback, initNativeQueueSync, syncNativeQueue, syncNativeRepeatMode } from "./nativeQueueSync.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
 // Only present inside the Capacitor-wrapped Android app, once the native
 // playback engine (ExoPlayer, via PlaybackService) is installed — a real
-// native foreground service never gets frozen by Chromium's background-tab
-// JS policy the way the WebView's own <audio> element does. Guarded
-// defensively so jsdom tests (NativePlayer undefined) exercise the <audio> path.
+// native foreground service never freezes the way the WebView's own <audio>
+// element does. Guarded so jsdom tests (NativePlayer undefined) use <audio>.
 function nativePlayerPlugin() {
   return isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
 }
@@ -23,8 +22,8 @@ function nativePlayerPlugin() {
 export const audioEl = nativePlayerPlugin() ? new NativeAudioElement(nativePlayerPlugin()) : new Audio();
 audioEl.preload = "auto";
 
-// Native engine only — reconciles JS's queue state after native's own Next/Previous/auto-advance.
-initNativeQueueSync(applyNativeTrackChange);
+// player (const, below) isn't initialized yet here -- passed as a thunk, read only once the listener fires.
+initNativeQueueSync(applyNativeTrackChange, () => player.onStatus);
 
 // Only present inside the Capacitor-wrapped Android app (js/vendor/) — a
 // real Android foreground service tied to media playback, which is what
@@ -362,41 +361,7 @@ export async function playCurrent() {
     player.onTrackChange && player.onTrackChange(item);
     savePlaybackState();
 
-    id3Promise.then((tags) => {
-      if (!tags || currentTrack() !== item) return;
-
-      let pictureUrl = null;
-      if (tags.picture && tags.picture.bytes && tags.picture.bytes.length > 0) {
-        if (currentArtBlobUrl) URL.revokeObjectURL(currentArtBlobUrl);
-        const blob = new Blob([tags.picture.bytes], { type: tags.picture.mimeType || "image/jpeg" });
-        pictureUrl = URL.createObjectURL(blob);
-        currentArtBlobUrl = pictureUrl;
-      }
-
-      if (!tags.artist && !tags.album && !tags.title && !pictureUrl) return;
-
-      const title = tags.title || item.name.replace(/\.[^/.]+$/, "");
-      const artist = tags.artist || (item.audio && item.audio.artist) || "OneDrive";
-      const album = tags.album || (item.audio && item.audio.album) || "";
-
-      if (audioEl.setNowPlayingMetadata) audioEl.setNowPlayingMetadata({ title, artist, album });
-
-      if ("mediaSession" in navigator && navigator.mediaSession.metadata) {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title,
-          artist,
-          album,
-          artwork: pictureUrl ? [{ src: pictureUrl, sizes: "512x512", type: tags.picture.mimeType }] : [],
-        });
-      }
-      const native = nativeMediaSession();
-      // Native artwork is skipped: the plugin's Android side can't turn a
-      // blob: URL into a Bitmap (only http/base64), so passing it would just
-      // log a warning and no-op — title/artist/album still update fine.
-      if (native) native.setMetadata({ title, artist, album, artwork: [] });
-      updateCarMetadata(title, artist, album, isFinite(audioEl.duration) ? audioEl.duration * 1000 : 0);
-      player.onRealTags && player.onRealTags({ ...tags, pictureUrl });
-    });
+    id3Promise.then((tags) => applyRealTags(item, tags));
   } catch (err) {
     if (err && err.status === 404) {
       // The file was deleted in OneDrive: drop it from the library and move on,
@@ -518,37 +483,72 @@ function advanceOrderPos(delta) {
   return true;
 }
 
-// On native, a thin pass-through to NativePlayerPlugin.requestNext() — the
-// same method hardware/notification presses reach — so there's one
-// implementation of "what does Next mean," not two that could drift.
+// On native, a thin pass-through to NativePlayerPlugin.requestNext() — same
+// method hardware/notification presses reach, one implementation, not two.
 export function playNext() {
   const plugin = nativePlayerPlugin();
-  if (plugin) return plugin.next();
+  if (plugin) {
+    armPendingAdvanceFeedback(player.onStatus);
+    return plugin.next();
+  }
   if (advanceOrderPos(1)) playCurrent();
   else setWantsToPlay(false); // end of queue, repeat off — nothing left to protect
 }
 
 export function playPrevious() {
   const plugin = nativePlayerPlugin();
-  if (plugin) return plugin.previous();
-  if (audioEl.currentTime > 3) {
-    audioEl.currentTime = 0; // restart current track, like most players
-  } else if (advanceOrderPos(-1)) {
-    playCurrent();
+  if (plugin) {
+    armPendingAdvanceFeedback(player.onStatus);
+    return plugin.previous();
   }
+  if (audioEl.currentTime > 3) audioEl.currentTime = 0; // restart current track, like most players
+  else if (advanceOrderPos(-1)) playCurrent();
 }
 
-// Reconciles JS's bookkeeping after native already loaded+started `itemId`
-// on its own — read-only, never calls playCurrent()/playNext() itself.
-function applyNativeTrackChange({ itemId, position }) {
+// Reconciles JS's bookkeeping after native already loaded+started `itemId` on its own.
+function applyNativeTrackChange({ itemId, position, url }) {
+  clearPendingAdvanceFeedback(player.onStatus);
   if (position == null || position < 0 || position >= playOrder.length) return;
-  orderPos = position;
-  queueIndex = playOrder[orderPos];
-  const item = currentTrack();
+  // Verified before committing -- mirrors NativeQueueManager's own
+  // peekAdvancePosition()/commitPosition() split, same reason.
+  const candidateIndex = playOrder[position];
+  const item = queue[candidateIndex];
   if (!item || item.id !== itemId) return;
+  orderPos = position;
+  queueIndex = candidateIndex;
   loadedTrackId = itemId;
   savePlaybackState();
   player.onTrackChange && player.onTrackChange(item);
+  if (url) readId3Tags(url).then((tags) => applyRealTags(item, tags)); // real artist/album over the filename guess
+}
+
+// Pushes real embedded-ID3 title/artist/album over the filename guess --
+// shared by playCurrent() and applyNativeTrackChange().
+function applyRealTags(item, tags) {
+  if (!tags || currentTrack() !== item) return;
+  let pictureUrl = null;
+  if (tags.picture && tags.picture.bytes && tags.picture.bytes.length > 0) {
+    if (currentArtBlobUrl) URL.revokeObjectURL(currentArtBlobUrl);
+    const blob = new Blob([tags.picture.bytes], { type: tags.picture.mimeType || "image/jpeg" });
+    pictureUrl = URL.createObjectURL(blob);
+    currentArtBlobUrl = pictureUrl;
+  }
+  if (!tags.artist && !tags.album && !tags.title && !pictureUrl) return;
+  const title = tags.title || item.name.replace(/\.[^/.]+$/, "");
+  const artist = tags.artist || (item.audio && item.audio.artist) || libraryArtistFor(item.id);
+  const album = tags.album || (item.audio && item.audio.album) || "";
+  if (audioEl.setNowPlayingMetadata) audioEl.setNowPlayingMetadata({ title, artist, album });
+  if ("mediaSession" in navigator && navigator.mediaSession.metadata) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title, artist, album,
+      artwork: pictureUrl ? [{ src: pictureUrl, sizes: "512x512", type: tags.picture.mimeType }] : [],
+    });
+  }
+  // Native artwork skipped: can't turn a blob: URL into a Bitmap (only http/base64).
+  const native = nativeMediaSession();
+  if (native) native.setMetadata({ title, artist, album, artwork: [] });
+  updateCarMetadata(title, artist, album, isFinite(audioEl.duration) ? audioEl.duration * 1000 : 0);
+  player.onRealTags && player.onRealTags({ ...tags, pictureUrl });
 }
 
 // Pure lookahead over playOrder/queue — both already sit in memory (the
@@ -641,6 +641,7 @@ export function resetPlayer() {
 // navigator.onLine actually going false) usually needs a few attempts spread
 // over time to ride out, not just one immediate retry.
 audioEl.addEventListener("error", async () => {
+  clearPendingAdvanceFeedback(player.onStatus); // this handler owns status messaging from here on
   const item = currentTrack();
   if (!item) return;
   // Same generation token playCurrent() uses — an item-reference check
@@ -853,7 +854,7 @@ window.addEventListener("pagehide", () => savePlaybackState());
 function basicMetadataFor(item) {
   return {
     title: item.name.replace(/\.[^/.]+$/, ""),
-    artist: (item.audio && item.audio.artist) || "OneDrive",
+    artist: (item.audio && item.audio.artist) || libraryArtistFor(item.id),
     album: (item.audio && item.audio.album) || "",
   };
 }

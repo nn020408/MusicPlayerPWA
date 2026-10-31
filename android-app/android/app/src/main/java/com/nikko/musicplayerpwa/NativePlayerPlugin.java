@@ -3,6 +3,7 @@ package com.nikko.musicplayerpwa;
 import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.MediaItem;
@@ -37,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 // possibly more than one listener") case.
 @CapacitorPlugin(name = "NativePlayer")
 public class NativePlayerPlugin extends Plugin {
+    private static final String TAG = "NativePlayerPlugin";
     private static final long POSITION_TICK_MS = 500;
     // Bounds the 404-drop-and-retry loop in resolveAndLoad() so a fully-stale
     // queue can't spin forever.
@@ -194,6 +196,27 @@ public class NativePlayerPlugin extends Plugin {
                 data.put("message", error.getMessage());
                 notifyListeners("error", data);
                 rejectPendingStart(error.getMessage());
+                // See currentLoadUsedUnverifiedPrefetch's own comment -- only
+                // this specific, unverified-prefetch case gets treated as
+                // "probably gone, drop and continue." Any other playback
+                // error (a genuinely transient network blip on a freshly-
+                // resolved, confirmed-to-exist URL) is left to the existing
+                // JS-side reconnect/retry path instead of yanking a perfectly
+                // good track out of the queue over a momentary hiccup.
+                if (currentLoadUsedUnverifiedPrefetch) {
+                    currentLoadUsedUnverifiedPrefetch = false;
+                    queueExecutor.execute(() -> {
+                        NativeQueueManager qm = NativeQueueManager.getInstance(getContext());
+                        int failedPos = qm.getPosition();
+                        NativeQueueManager.TrackDescriptor failedTrack = qm.getTrackAt(failedPos);
+                        if (failedTrack == null) return;
+                        JSObject itemData = new JSObject();
+                        itemData.put("itemId", failedTrack.id);
+                        notifyListeners("itemUnavailable", itemData);
+                        qm.removeAt(failedPos);
+                        resolveAndLoadAt(qm, failedPos, MAX_QUEUE_ADVANCE_RETRIES);
+                    });
+                }
             }
         };
         player.addListener(playerListener);
@@ -224,6 +247,11 @@ public class NativePlayerPlugin extends Plugin {
                     ExoPlayer player = currentPlayer();
                     if (player != null) player.seekTo(0); // restart current track, like most players
                 });
+                // No trackChanged follows a same-track restart -- without this,
+                // JS's armPendingAdvanceFeedback timer (see player.js) had
+                // nothing to ever clear it, leaving a bogus "Connection
+                // trouble" toast on screen until the next unrelated track change.
+                notifyListeners("advanceSettled", new JSObject());
             } else {
                 resolveAndLoad(-1, MAX_QUEUE_ADVANCE_RETRIES);
             }
@@ -253,36 +281,118 @@ public class NativePlayerPlugin extends Plugin {
         return result[0];
     }
 
+    // One-ahead prefetch cache: the next track's streaming URL, resolved in
+    // the background while the current one plays -- without this, every
+    // single Next does a cold Graph round-trip, which is what makes it feel
+    // slow/inconsistent instead of the near-instant skip Spotify/YouTube
+    // Music manage by having usually already resolved it ahead of time.
+    // Only ever covers the immediate-next (delta +1) track, not Previous --
+    // Previous's "restart vs go back" branching depends on live playback
+    // position at the moment it's pressed, so there's nothing to prefetch for.
+    private volatile String prefetchedTrackId;
+    private volatile String prefetchedUrl;
+    // True for whatever's currently loaded if its URL came from the
+    // prefetch cache (see prefetchedTrackId's comment) rather than a fresh
+    // NativeGraphClient.resolveDownloadUrl() call -- that fresh call is the
+    // only thing that can ever surface an ItemGoneException, so a prefetched
+    // URL for a track deleted in the window between prefetching it and
+    // actually playing it skips that check entirely and only ever surfaces
+    // as a generic ExoPlayer playback error. onPlayerError() uses this flag
+    // to recover the same way a confirmed-404 would, instead of just
+    // stranding playback on a dead track.
+    private volatile boolean currentLoadUsedUnverifiedPrefetch;
+
     // Runs on queueExecutor -- resolving a download URL is a blocking network
-    // call. Handles both an explicit Next/Previous (delta=±1, and the single
-    // retry step after dropping a 404'd track uses delta=0 since `qm` is
-    // already sitting on the next candidate) and natural track-end.
+    // call. Handles both an explicit Next/Previous (delta=±1) and natural
+    // track-end. The candidate position is only a peek (qm.peekAdvancePosition
+    // doesn't mutate anything) until the resolve+load actually succeeds --
+    // confirmed on-device as a real bug without this split: the old code
+    // committed qm's position immediately via advance(), before knowing the
+    // resolve would even work. Any transient failure (a Graph timeout, an
+    // auth-refresh race with JS's own refresh -- both only ever retried
+    // inside NativeGraphClient, not here) left qm's position permanently
+    // pointing at a track that was never actually loaded, silently detached
+    // from what ExoPlayer still had playing. getState() then reported a
+    // position/itemId that didn't match reality, and every subsequent Next/
+    // Previous press just advanced that already-detached pointer further
+    // instead of retrying the track that actually needed loading --
+    // indistinguishable, from the user's seat, from the buttons just not
+    // working.
     private void resolveAndLoad(int delta, int attemptsLeft) {
         NativeQueueManager qm = NativeQueueManager.getInstance(getContext());
-        if (attemptsLeft <= 0 || !qm.advance(delta)) return;
-        NativeQueueManager.TrackDescriptor track = qm.getCurrentTrack();
+        if (attemptsLeft <= 0) {
+            notifyListeners("advanceSettled", new JSObject()); // see requestPrevious()'s own comment
+            return;
+        }
+        int candidatePos = qm.peekAdvancePosition(delta);
+        if (candidatePos < 0) {
+            notifyListeners("advanceSettled", new JSObject()); // end of queue, repeat off -- nothing to advance to
+            return;
+        }
+        resolveAndLoadAt(qm, candidatePos, attemptsLeft);
+    }
+
+    private void resolveAndLoadAt(NativeQueueManager qm, int candidatePos, int attemptsLeft) {
+        // Re-checked on every recursive step (dropping a run of several
+        // consecutive dead tracks), not just once at the top of
+        // resolveAndLoad() -- without this, attemptsLeft went negative and
+        // the documented 25-attempt cap on a fully-stale queue never
+        // actually applied.
+        if (attemptsLeft <= 0) return;
+        NativeQueueManager.TrackDescriptor track = qm.getTrackAt(candidatePos);
         if (track == null) return;
         try {
-            String url = NativeGraphClient.resolveDownloadUrl(getContext(), track.id);
-            int position = qm.getPosition();
-            main.post(() -> loadResolvedTrack(track, url, position));
+            String url;
+            boolean usedUnverifiedPrefetch = track.id.equals(prefetchedTrackId) && prefetchedUrl != null;
+            if (usedUnverifiedPrefetch) {
+                url = prefetchedUrl;
+            } else {
+                url = NativeGraphClient.resolveDownloadUrl(getContext(), track.id);
+            }
+            prefetchedTrackId = null;
+            prefetchedUrl = null;
+            qm.commitPosition(candidatePos); // only now, having confirmed this track can actually be loaded
+            main.post(() -> loadResolvedTrack(track, url, candidatePos, usedUnverifiedPrefetch));
         } catch (NativeGraphClient.ItemGoneException e) {
+            Log.w(TAG, "Dropping unavailable queue item " + track.id);
             JSObject data = new JSObject();
             data.put("itemId", track.id);
             notifyListeners("itemUnavailable", data);
-            qm.removeAt(qm.getPosition());
-            resolveAndLoad(0, attemptsLeft - 1);
+            qm.removeAt(candidatePos);
+            // Removing shifts everything after it down one slot, so whatever
+            // should be tried next now lives at this same index.
+            resolveAndLoadAt(qm, candidatePos, attemptsLeft - 1);
         } catch (Exception e) {
+            Log.e(TAG, "Failed to resolve/load queue position " + candidatePos, e);
             JSObject data = new JSObject();
             data.put("message", e.getMessage());
             notifyListeners("error", data);
         }
     }
 
-    private void loadResolvedTrack(NativeQueueManager.TrackDescriptor track, String url, int position) {
+    // Resolves and caches the upcoming track's URL ahead of time -- see
+    // prefetchedTrackId/prefetchedUrl's own comment. Runs on queueExecutor;
+    // best-effort only, a failure here just means the next resolveAndLoad()
+    // falls back to its normal cold fetch.
+    private void prefetchNext() {
+        queueExecutor.execute(() -> {
+            NativeQueueManager qm = NativeQueueManager.getInstance(getContext());
+            NativeQueueManager.TrackDescriptor next = qm.peek(1);
+            if (next == null || next.id.equals(prefetchedTrackId)) return;
+            try {
+                prefetchedUrl = NativeGraphClient.resolveDownloadUrl(getContext(), next.id);
+                prefetchedTrackId = next.id;
+            } catch (Exception ignored) {
+                // Best-effort -- see method comment.
+            }
+        });
+    }
+
+    private void loadResolvedTrack(NativeQueueManager.TrackDescriptor track, String url, int position, boolean usedUnverifiedPrefetch) {
         ExoPlayer player = currentPlayer();
         if (player == null) return;
         attachListenerIfNeeded(player);
+        currentLoadUsedUnverifiedPrefetch = usedUnverifiedPrefetch;
         MediaMetadata metadata = new MediaMetadata.Builder()
                 .setTitle(track.name)
                 .setArtist(track.artist)
@@ -290,14 +400,19 @@ public class NativePlayerPlugin extends Plugin {
         MediaItem item = new MediaItem.Builder().setUri(url).setMediaMetadata(metadata).build();
         player.setMediaItem(item, 0);
         player.prepare();
+        prefetchNext();
         player.play();
         // UI-sync only (see js/player/nativeQueueSync.js) -- never blocks the
         // actual swap above, which has already happened by the time this fires.
+        // Includes the resolved `url` so JS can read embedded ID3 tags for the
+        // real artist/album/title (see player.js's applyNativeTrackChange())
+        // without a second Graph round-trip to re-resolve one it already has.
         JSObject data = new JSObject();
         data.put("itemId", track.id);
         data.put("position", position);
         data.put("name", track.name);
         data.put("artist", track.artist);
+        data.put("url", url);
         notifyListeners("trackChanged", data);
     }
 
@@ -310,6 +425,15 @@ public class NativePlayerPlugin extends Plugin {
         data.put("refreshToken", refreshToken);
         data.put("expiresAt", (double) expiresAt);
         notifyListeners("nativeAuthTokensUpdated", data);
+    }
+
+    // Native gave up on the tokens entirely (Microsoft rejected a refresh --
+    // see NativeAuthClient.TokenRejectedException). Without this, JS's own
+    // localStorage cache kept trusting its copy until its own locally-cached
+    // expiresAt elapsed (up to ~55 minutes), even though native had already
+    // discarded the same tokens and would reject any further use of them.
+    void notifyAuthTokensCleared() {
+        notifyListeners("nativeAuthTokensCleared", new JSObject());
     }
 
     @PluginMethod
@@ -338,6 +462,12 @@ public class NativePlayerPlugin extends Plugin {
                     attachListenerIfNeeded(player);
                     rejectPendingStart("Superseded by a newer load/play call");
                     pendingStartCall = call;
+                    // This URL always came from JS's own (already-verified)
+                    // resolve, never the native prefetch cache -- see
+                    // currentLoadUsedUnverifiedPrefetch's comment. A failure
+                    // here goes through JS's own existing reconnect/retry
+                    // path, not the native drop-and-continue one.
+                    currentLoadUsedUnverifiedPrefetch = false;
                     MediaMetadata metadata = new MediaMetadata.Builder()
                             .setTitle(title)
                             .setArtist(artist)
@@ -347,6 +477,7 @@ public class NativePlayerPlugin extends Plugin {
                     player.setMediaItem(item, resumePositionMs);
                     player.prepare();
                     player.play();
+                    prefetchNext();
                 }),
                 () -> call.reject("Playback service didn't start in time")
         );
@@ -475,6 +606,29 @@ public class NativePlayerPlugin extends Plugin {
     public void clearAuthTokens(PluginCall call) {
         NativeAuthClient.getInstance(getContext()).clearTokens();
         call.resolve();
+    }
+
+    // The ONLY path JS uses to get/refresh an access token on native (see
+    // js/data/auth.js's nativeGetAccessToken()) -- JS used to run its own
+    // separate refresh-token POST here too, and that second, uncoordinated
+    // copy racing this class's own is what got this account's login flagged
+    // by Microsoft as a "client request loop" (AADSTS50196), confirmed
+    // on-device. Blocking network call -- safe here since @PluginMethod calls
+    // already run on Capacitor's own plugin thread, not main (same as
+    // getState() below).
+    @PluginMethod
+    public void getAccessToken(PluginCall call) {
+        try {
+            boolean force = call.getBoolean("force", false);
+            String[] snapshot = NativeAuthClient.getInstance(getContext()).getTokenSnapshot(force);
+            JSObject data = new JSObject();
+            data.put("accessToken", snapshot[0]);
+            data.put("refreshToken", snapshot[1]);
+            data.put("expiresAt", Double.parseDouble(snapshot[2]));
+            call.resolve(data);
+        } catch (Exception e) {
+            call.reject(e.getMessage(), e);
+        }
     }
 
     // Updates the currently-loaded item's metadata (title/artist/album) once

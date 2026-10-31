@@ -5,6 +5,7 @@ import { el } from "../core/dom.js";
 import { formatTime } from "../core/text.js";
 import { findOnlineArtwork } from "../data/artwork.js";
 import { getThumbnailUrl } from "../data/graph.js";
+import { libraryArtistFor } from "../data/library.js";
 import { audioEl, currentTrack, cycleRepeat, player, playNext, playPause, playPrevious, seekTo, toggleShuffle } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { deleteTrackWithConfirm } from "./trackActions.js";
@@ -64,7 +65,7 @@ player.onTrackChange = (item) => {
   pulseArtSwap(el.npArt);
   pulseArtSwap(el.fullPlayerArt);
   const title = item.name.replace(/\.[^/.]+$/, "");
-  const artist = (item.audio && item.audio.artist) || "OneDrive";
+  const artist = (item.audio && item.audio.artist) || libraryArtistFor(item.id);
   el.nowPlayingTitle.textContent = title;
   el.nowPlayingArtist.textContent = artist;
   el.fullTitle.textContent = title;

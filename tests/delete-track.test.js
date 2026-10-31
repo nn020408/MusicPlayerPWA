@@ -25,6 +25,19 @@ const check = (name, ok, detail = "") => {
   const titles = () => JSON.parse(window.localStorage.getItem("libraryIndexCache")).tracks.map((t) => t.name);
   const hidden = (sel) => $(sel).classList.contains("hidden");
 
+  // Assumes a delete trigger (the ⋮ menu's Delete, or the full player's
+  // trash icon) was just clicked, opening the delete-confirm dialog (see
+  // trackActions.js). Waits out its short confirm delay and clicks through.
+  const confirmDelete = async () => {
+    await sleep(50);
+    $("#delete-confirm-btn").click(); // disabled -- a browser no-ops a click on a disabled button
+    await sleep(100);
+    check("delete stays blocked until the confirm delay elapses", !hidden("#delete-confirm-modal"));
+    await sleep(1600);
+    check("delete button enables once the delay elapses", !$("#delete-confirm-btn").disabled);
+    $("#delete-confirm-btn").click();
+  };
+
   // ---- the menu, and cancelling out of it changes nothing
   $$("#file-list .folder-row").find((r) => r.textContent.includes("Pop")).click();
   await sleep(300);
@@ -35,11 +48,22 @@ const check = (name, ok, detail = "") => {
   $("#track-actions-cancel-btn").click();
   check("cancel just closes the menu", hidden("#track-actions-modal") && titles().includes("Who Knew.mp3"));
 
+  // ---- cancelling the delete-confirm dialog itself also changes nothing
+  $$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")).querySelector(".row-menu-btn").click();
+  await sleep(50);
+  $("#track-delete-btn").click();
+  await sleep(50);
+  check("the delete-confirm dialog opens, button starts disabled", !hidden("#delete-confirm-modal") && $("#delete-confirm-btn").disabled);
+  $("#delete-confirm-cancel-btn").click();
+  await sleep(50);
+  check("cancelling it closes the dialog and deletes nothing", hidden("#delete-confirm-modal") && titles().includes("Who Knew.mp3"));
+
   // ---- a failed delete (e.g. no permission) leaves everything as it was
   FAIL_DELETE.add("pop/Who Knew.mp3");
   $$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")).querySelector(".row-menu-btn").click();
   await sleep(50);
   $("#track-delete-btn").click();
+  await confirmDelete();
   await sleep(200);
   check("a failed delete says so", /Couldn't delete "Who Knew"/.test($("#toast").textContent), $("#toast").textContent);
   check("a failed delete doesn't touch the library", titles().includes("Who Knew.mp3"));
@@ -50,6 +74,7 @@ const check = (name, ok, detail = "") => {
   $$("#file-list .track-row").find((r) => r.textContent.includes("Who Knew")).querySelector(".row-menu-btn").click();
   await sleep(50);
   $("#track-delete-btn").click();
+  await confirmDelete();
   await sleep(300);
   check("Graph got the delete request", DELETED.includes("pop/Who Knew.mp3"), DELETED.join(","));
   check("the song is dropped from the library cache", !titles().includes("Who Knew.mp3"));
@@ -68,6 +93,7 @@ const check = (name, ok, detail = "") => {
   $("#now-playing-bar .np-title").click();
   await sleep(100);
   $("#full-player-delete-btn").click();
+  await confirmDelete();
   await sleep(300);
   check("deleting the playing song moves on to another one", /Hips Don't Lie/.test($("#now-playing-title").textContent), $("#now-playing-title").textContent);
   check("it's gone from the library cache too", !titles().includes("Baila Conmigo.mp3"));
@@ -91,6 +117,7 @@ const check = (name, ok, detail = "") => {
   $$("#file-list .track-row").find((r) => r.textContent.includes("Pedro Navaja")).querySelector(".row-menu-btn").click();
   await sleep(50);
   $("#track-delete-btn").click();
+  await confirmDelete();
   await sleep(300);
   const afterDelete = JSON.parse(window.localStorage.getItem("playlists") || "[]").find((p) => p.name === "Road Trip");
   check("deleting it drops it from the playlist too", !!afterDelete && !afterDelete.tracks.some((t) => t.name === "Pedro Navaja.mp3"), JSON.stringify(afterDelete && afterDelete.tracks));

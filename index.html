@@ -437,6 +437,20 @@
     </div>
   </div>
 
+  <!-- Delete-from-OneDrive confirmation. The Delete button starts disabled
+       and only enables after a short delay (see trackActions.js) so an
+       accidental double-tap -- a phone unlocked in a pocket hitting the
+       trash icon and then this dialog in quick succession -- can't actually
+       delete anything; a real person reading the prompt clears it easily. -->
+  <div id="delete-confirm-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Delete from OneDrive?</h3>
+      <p id="delete-confirm-message"></p>
+      <button id="delete-confirm-btn" class="secondary-btn danger" disabled></button>
+      <button id="delete-confirm-cancel-btn" class="text-btn">Cancel</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
   <!-- Vendored Capacitor bridge + media-session plugin (js/vendor/) — only

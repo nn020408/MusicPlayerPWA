@@ -31,8 +31,8 @@ export async function retryWithBackoff(attempt, { maxAttempts = 6, baseDelayMs =
 
 // Accepts either a relative Graph path ("/me/drive/...") or a full absolute
 // URL (used for @odata.nextLink pagination, which Graph returns as a full URL).
-async function graphGet(pathOrUrl, { priority } = {}) {
-  const token = await getAccessToken();
+async function graphGet(pathOrUrl, { priority } = {}, isRetry) {
+  const token = await getAccessToken(isRetry);
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : GRAPH_ROOT + pathOrUrl;
   const fetchOptions = { headers: { Authorization: `Bearer ${token}` } };
   // Fetch Priority Hints (Chrome/WebView 101+, ignored elsewhere) — lets the
@@ -41,6 +41,12 @@ async function graphGet(pathOrUrl, { priority } = {}) {
   // mid-scan) instead of making it queue behind up to 5 scan requests.
   if (priority) fetchOptions.priority = priority;
   const res = await fetch(url, fetchOptions);
+  // A 401 means the server itself just rejected this exact token -- retried
+  // once with a forced fresh one instead of letting retryWithBackoff's
+  // default shouldRetry just call getAccessToken() again, which would return
+  // the SAME cached token (still "fresh" by its own clock) and burn through
+  // the whole backoff for a request doomed to fail identically every time.
+  if (res.status === 401 && !isRetry) return graphGet(pathOrUrl, { priority }, true);
   if (!res.ok) {
     const err = new Error(`Graph request failed: ${res.status}`);
     err.status = res.status; // lets callers tell "gone" (404) apart from a flaky connection

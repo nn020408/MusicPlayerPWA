@@ -53,6 +53,57 @@ el.trackRemovePlaylistBtn.addEventListener("click", () => {
   }
 });
 
+// How long the delete-confirm button stays disabled after the dialog opens —
+// long enough that a real person reading the prompt clears it without even
+// noticing, short enough not to feel like a deliberate delay. A plain
+// confirm() used to let a phone unlocked in a pocket chain two accidental
+// taps (trash icon, then confirm) into an actual, irreversible OneDrive
+// delete; this makes the second tap land before the button can respond to it.
+const DELETE_CONFIRM_DELAY_MS = 1500;
+
+let pendingDeleteCancel = null; // set while the dialog is open, lets backButton.js dismiss it as Cancel
+
+function showDeleteConfirm(name) {
+  el.deleteConfirmMessage.textContent = `Delete "${name}" from OneDrive? This can't be undone.`;
+  el.deleteConfirmModal.classList.remove("hidden");
+  el.deleteConfirmBtn.disabled = true;
+  el.deleteConfirmBtn.textContent = `🗑 Delete from OneDrive (${Math.ceil(DELETE_CONFIRM_DELAY_MS / 1000)})`;
+  return new Promise((resolve) => {
+    const deadline = Date.now() + DELETE_CONFIRM_DELAY_MS;
+    const tick = setInterval(() => {
+      const secondsLeft = Math.ceil((deadline - Date.now()) / 1000);
+      if (secondsLeft <= 0) {
+        clearInterval(tick);
+        el.deleteConfirmBtn.disabled = false;
+        el.deleteConfirmBtn.textContent = "🗑 Delete from OneDrive";
+      } else {
+        el.deleteConfirmBtn.textContent = `🗑 Delete from OneDrive (${secondsLeft})`;
+      }
+    }, 200);
+    const settle = (result) => {
+      clearInterval(tick);
+      pendingDeleteCancel = null;
+      el.deleteConfirmModal.classList.add("hidden");
+      el.deleteConfirmBtn.removeEventListener("click", onConfirm);
+      el.deleteConfirmCancelBtn.removeEventListener("click", onCancel);
+      resolve(result);
+    };
+    const onConfirm = () => settle(true);
+    const onCancel = () => settle(false);
+    pendingDeleteCancel = onCancel;
+    el.deleteConfirmBtn.addEventListener("click", onConfirm);
+    el.deleteConfirmCancelBtn.addEventListener("click", onCancel);
+  });
+}
+
+// Lets backButton.js dismiss an open delete-confirm dialog the same way it
+// dismisses every other modal, instead of leaving its Promise unresolved
+// (and its countdown timer running) if the hardware/gesture back button is
+// pressed while it's open.
+export function cancelPendingDeleteConfirm() {
+  if (pendingDeleteCancel) pendingDeleteCancel();
+}
+
 // Deletes the song from OneDrive itself (not just this device's view of it)
 // — asks first, since this can't be undone. Shared by the modal's own
 // "Delete from OneDrive" button and the full player's trash icon.
@@ -64,7 +115,7 @@ el.trackRemovePlaylistBtn.addEventListener("click", () => {
 // immediately, and stays gone after an app restart without needing a rescan.
 export async function deleteTrackWithConfirm(track, { onDeleted } = {}) {
   const name = titleOf(track);
-  if (!confirm(`Delete "${name}" from OneDrive? This can't be undone.`)) return;
+  if (!(await showDeleteConfirm(name))) return;
   try {
     await deleteItem(track.id);
   } catch (err) {

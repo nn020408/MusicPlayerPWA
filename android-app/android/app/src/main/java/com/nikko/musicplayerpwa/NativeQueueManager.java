@@ -125,31 +125,70 @@ class NativeQueueManager {
     }
 
     // Mirrors player.js's advanceOrderPos(): wraps only on repeat-all, returns
-    // false if there's nowhere to go (e.g. end of queue with repeat off).
-    synchronized boolean advance(int delta) {
-        if (tracks.isEmpty()) return false;
+    // -1 if there's nowhere to go (e.g. end of queue with repeat off). Pure --
+    // doesn't touch `position` -- so a caller can check whether a track can
+    // even be loaded before committing to it. See commitPosition() and
+    // NativePlayerPlugin.resolveAndLoad()'s own comment for why that split
+    // matters: committing eagerly (this used to mutate+persist directly) left
+    // `position` pointing at a track that was never actually loaded whenever
+    // the subsequent resolve failed, permanently decoupling it from what
+    // ExoPlayer actually had playing.
+    synchronized int peekAdvancePosition(int delta) {
+        if (tracks.isEmpty()) return -1;
         int pos = position + delta;
         if (pos < 0) {
             if ("all".equals(repeatMode)) pos = tracks.size() - 1;
-            else return false;
+            else return -1;
         } else if (pos >= tracks.size()) {
             if ("all".equals(repeatMode)) pos = 0;
-            else return false;
+            else return -1;
         }
+        return pos;
+    }
+
+    // Commits a position computed by peekAdvancePosition() -- only called once
+    // the caller has confirmed the track there can actually be resolved/loaded.
+    synchronized void commitPosition(int pos) {
         position = pos;
         persist();
-        return true;
+    }
+
+    // Read-only lookahead (e.g. prefetching the next track's URL ahead of
+    // time, before Next is actually pressed) -- same wraparound rules as
+    // peekAdvancePosition(), returning the track itself rather than an index.
+    // Null if there's nowhere to go.
+    synchronized TrackDescriptor peek(int delta) {
+        if (tracks.isEmpty()) return null;
+        int pos = position + delta;
+        if (pos < 0) {
+            if (!"all".equals(repeatMode)) return null;
+            pos = tracks.size() - 1;
+        } else if (pos >= tracks.size()) {
+            if (!"all".equals(repeatMode)) return null;
+            pos = 0;
+        }
+        return tracks.get(pos);
     }
 
     // Drops a confirmed-gone (404) track from the sequence so a stale queue
     // entry isn't retried forever -- see NativePlayerPlugin's resolve-and-load
     // loop. Leaves `position` pointing at whatever slides into this slot (the
-    // next candidate in the same direction).
+    // next candidate in the same direction) when the removed slot IS
+    // `position` -- but when it's BEFORE `position` (removing a dead
+    // candidate while Previous was looking for one, with the actually-
+    // current track sitting later in the list), `position` has to shift down
+    // with it. Confirmed as a real bug without this: the currently-playing
+    // track's own index would silently become wrong, and the next advance
+    // from that position would resolve/reload the WRONG (often the
+    // currently-playing) track instead of continuing in the direction the
+    // user pressed.
     synchronized void removeAt(int pos) {
         if (pos < 0 || pos >= tracks.size()) return;
         tracks.remove(pos);
         if (tracks.isEmpty()) {
             position = -1;
+        } else if (pos < position) {
+            position--;
         } else if (position >= tracks.size()) {
             position = "all".equals(repeatMode) ? 0 : tracks.size() - 1;
         }

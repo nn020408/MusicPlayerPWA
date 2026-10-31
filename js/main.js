@@ -7,7 +7,7 @@ import { APP_VERSION } from "./core/config.js";
 import { el } from "./core/dom.js";
 import { getActiveAccount, initAuth, signIn, signOut } from "./data/auth.js";
 import { clearFolderListCache } from "./data/graph.js";
-import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, libraryTracks } from "./data/library.js";
+import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, libraryArtistFor, libraryTracks } from "./data/library.js";
 import { ensureFavoritesPlaylist } from "./data/playlists.js";
 import { audioEl, player, repeatMode, resetPlayer, restorePlaybackState, shuffleOn } from "./player/player.js";
 import { paintFallbackArt } from "./ui/fallbackArt.js";
@@ -28,7 +28,7 @@ import "./ui/swipe.js";
 function showRestoredTrackDisplay(item) {
   el.nowPlayingBar.classList.remove("hidden");
   const title = item.name.replace(/\.[^/.]+$/, "");
-  const artist = (item.audio && item.audio.artist) || "OneDrive";
+  const artist = (item.audio && item.audio.artist) || libraryArtistFor(item.id);
   el.nowPlayingTitle.textContent = title;
   el.nowPlayingArtist.textContent = artist;
   el.fullTitle.textContent = title;
@@ -76,11 +76,11 @@ function showApp() {
     // to open Search first. Also, if restoredItem's own stale queue snapshot
     // (see playCurrent() in player.js) was missing its artist, the library
     // cache this loads usually already has it — patch the still-unplayed
-    // restored display's artist text once that's in, instead of leaving
-    // "OneDrive" showing until the user actually presses play. Guarded on
-    // playback not having started yet (audioEl still paused): once it has,
-    // playCurrent()'s own fix has already taken care of it, and rewriting
-    // the display here could race a button/art update already in progress.
+    // restored display's artist text once that's in, instead of leaving it
+    // blank until the user actually presses play. Guarded on playback not
+    // having started yet (audioEl still paused): once it has, playCurrent()'s
+    // own fix has already taken care of it, and rewriting the display here
+    // could race a button/art update already in progress.
     ensureLibraryLoaded().then(() => {
       if (restoredItem && audioEl.paused && (!restoredItem.audio || !restoredItem.audio.artist)) {
         const live = libraryTracks.find((t) => t.id === restoredItem.id);
