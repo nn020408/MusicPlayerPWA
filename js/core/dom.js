@@ -70,6 +70,7 @@ export const el = {
   loginVersionLabel: document.getElementById("login-version-label"),
   showIntroBtn: document.getElementById("show-intro-btn"),
   errorLogBtn: document.getElementById("error-log-btn"),
+  changelogBtn: document.getElementById("changelog-btn"),
 
   introOverlay: document.getElementById("intro-overlay"),
   introBackBtn: document.getElementById("intro-back-btn"),
@@ -82,6 +83,10 @@ export const el = {
   errorLogCopyBtn: document.getElementById("error-log-copy-btn"),
   errorLogClearBtn: document.getElementById("error-log-clear-btn"),
   errorLogList: document.getElementById("error-log-list"),
+
+  changelogOverlay: document.getElementById("changelog-overlay"),
+  changelogBackBtn: document.getElementById("changelog-back-btn"),
+  changelogList: document.getElementById("changelog-list"),
 
   detailOverlay: document.getElementById("detail-overlay"),
   detailBackBtn: document.getElementById("detail-back-btn"),
@@ -118,6 +123,7 @@ export const el = {
   addToPlaylistBtn: document.getElementById("add-to-playlist-btn"),
   lyricsBtn: document.getElementById("lyrics-btn"),
   lyricsPanel: document.getElementById("lyrics-panel"),
+  lyricsAutoscrollBtn: document.getElementById("lyrics-autoscroll-btn"),
   fullPlayerArt: document.querySelector(".full-player-art"),
   fullArt: document.getElementById("full-art"),
   fullArtFallback: document.getElementById("full-art-fallback"),

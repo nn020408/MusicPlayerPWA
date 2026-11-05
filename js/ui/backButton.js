@@ -64,6 +64,11 @@ function handleBackPress() {
     el.errorLogOverlay.classList.add("hidden");
     return true;
   }
+  if (!el.changelogOverlay.classList.contains("hidden")) {
+    // Same Help-screen-sub-overlay case as errorLogOverlay above.
+    el.changelogOverlay.classList.add("hidden");
+    return true;
+  }
   // Settings' category screens (Library/Appearance/Backup/Help/Account) sit
   // on top of the category list the same way — one step back returns to it,
   // same "step out one layer at a time" rule as everything above.

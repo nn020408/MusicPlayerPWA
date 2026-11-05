@@ -182,8 +182,18 @@
       </div>
       <div class="settings-body">
         <button id="show-intro-btn" class="secondary-btn">📖 Show welcome guide again</button>
+        <button id="changelog-btn" class="secondary-btn">📋 What's new</button>
         <button id="error-log-btn" class="secondary-btn">🐞 View error log</button>
       </div>
+    </div>
+
+    <!-- What's new: user-facing release notes, see data/changelog.js. -->
+    <div id="changelog-overlay" class="overlay hidden">
+      <div class="overlay-header">
+        <button id="changelog-back-btn" class="text-btn">‹ Back</button>
+        <h2>What's new</h2>
+      </div>
+      <div id="changelog-list" class="settings-body"></div>
     </div>
 
     <div id="settings-account-overlay" class="overlay hidden">
@@ -341,6 +351,10 @@
          lyrics-btn, never shown at the same time as the art (see
          toggleLyricsView in js/ui/lyrics.js). -->
     <div id="lyrics-panel" class="lyrics-panel hidden"></div>
+    <!-- Kept OUTSIDE #lyrics-panel, not inside it -- renderLyricsPanel()
+         replaces that whole element's innerHTML every time lyrics (re)load,
+         which would wipe out a button living inside it. -->
+    <button id="lyrics-autoscroll-btn" class="icon-btn lyrics-autoscroll-btn icon-active hidden" title="Auto-scroll: on">📍</button>
     <div class="full-player-meta">
       <h2 id="full-title">—</h2>
       <p id="full-artist">—</p>

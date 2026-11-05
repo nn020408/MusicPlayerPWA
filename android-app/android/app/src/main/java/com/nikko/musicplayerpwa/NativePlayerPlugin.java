@@ -679,6 +679,18 @@ public class NativePlayerPlugin extends Plugin {
             NativeQueueManager.TrackDescriptor track = qm.getCurrentTrack();
             data.put("queuePosition", qm.getPosition());
             if (track != null) data.put("itemId", track.id);
+            // Lets js/player/nativeQueueSync.js's reconcile() (called when the
+            // WebView wakes up after being frozen while backgrounded -- the
+            // same case Next/Previous/auto-advance already run natively for)
+            // re-fetch the real ID3 title/artist, the same way a live
+            // trackChanged event already does. Without this, reconcile() had
+            // no URL to read tags from and could only ever show the filename
+            // guess for whatever native had already moved on to while the
+            // WebView was asleep -- confirmed as a real gap, not theoretical.
+            MediaItem currentItem = player != null ? player.getCurrentMediaItem() : null;
+            if (currentItem != null && currentItem.localConfiguration != null) {
+                data.put("url", currentItem.localConfiguration.uri.toString());
+            }
             call.resolve(data);
         });
     }

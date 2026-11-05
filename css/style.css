@@ -435,6 +435,11 @@ body.settings-open #now-playing-bar { display: none; }
   word-break: break-word;
 }
 
+.changelog-entry { padding-bottom: 20px; }
+.changelog-version { font-size: 15px; color: var(--accent); margin: 0 0 6px; }
+.changelog-entry ul { margin: 0; padding-left: 20px; }
+.changelog-entry li { font-size: 14px; line-height: 1.5; margin-bottom: 4px; }
+
 .spinner {
   display: inline-block;
   width: 12px;
@@ -759,6 +764,18 @@ body.settings-open #now-playing-bar { display: none; }
 }
 .lyrics-empty { margin-top: auto; margin-bottom: auto; }
 .icon-btn.icon-active { color: var(--accent); }
+/* Floats over the lyrics panel's top-right corner -- positioned relative to
+   .full-player (the nearest `position`-ed ancestor), not .lyrics-panel
+   itself, since that element's innerHTML gets fully replaced on every
+   (re)load and would take a child button down with it. */
+.lyrics-autoscroll-btn {
+  position: absolute;
+  top: 64px;
+  right: 20px;
+  z-index: 1;
+  background: var(--surface-2);
+  border-radius: 50%;
+}
 
 .full-player-meta { text-align: center; margin-top: 24px; }
 .full-player-meta h2 { font-size: 22px; margin: 0 0 4px; }

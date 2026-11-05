@@ -85,10 +85,17 @@ export function initNativeQueueSync(applyTrackChange, getOnStatus) {
   // delivered" (e.g. the WebView was frozen at the exact moment native
   // acted) — reconciles from native's own authoritative getState() whenever
   // the app comes back to the foreground, same idea as player.js's own
-  // visibilitychange/pagehide savePlaybackState() listeners.
+  // visibilitychange/pagehide savePlaybackState() listeners. Passes along
+  // getState()'s url (the currently-loaded media's actual URI) the same way
+  // a live trackChanged event does, so this can re-fetch the real ID3 title/
+  // artist too -- without it, catching up this way only ever showed the
+  // filename guess for whatever native had moved on to while asleep, on the
+  // phone's own display AND the car's Bluetooth metadata (same source).
   const reconcile = () => {
     p.getState().then((state) => {
-      if (state && state.itemId != null) applyTrackChange({ itemId: state.itemId, position: state.queuePosition });
+      if (state && state.itemId != null) {
+        applyTrackChange({ itemId: state.itemId, position: state.queuePosition, url: state.url, positionMs: state.positionMs });
+      }
     });
   };
   document.addEventListener("visibilitychange", () => {

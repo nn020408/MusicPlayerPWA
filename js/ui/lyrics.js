@@ -26,6 +26,11 @@ let resolveRealTagsPromise = null;
 
 let activeLyricsLineIndex = -1;
 
+// Lets a manual read-ahead/read-back stick instead of snapping back to the
+// current line every few seconds -- resets to on each time the panel is
+// (re)opened, so a forgotten-about pause doesn't silently persist forever.
+let lyricsAutoScroll = true;
+
 // A new track started: forget the previous track's real tags and set up a fresh
 // promise that provideRealTags() resolves — lets a lyrics fetch started before
 // the real tag arrives wait for it once instead of firing twice (fetch now with
@@ -54,6 +59,14 @@ export function closeLyricsView() {
   el.fullPlayerArt.classList.remove("hidden");
   el.lyricsPanel.classList.add("hidden");
   el.lyricsBtn.classList.remove("icon-active");
+  el.lyricsAutoscrollBtn.classList.add("hidden");
+  setLyricsAutoScroll(true);
+}
+
+function setLyricsAutoScroll(on) {
+  lyricsAutoScroll = on;
+  el.lyricsAutoscrollBtn.classList.toggle("icon-active", on);
+  el.lyricsAutoscrollBtn.title = on ? "Auto-scroll: on" : "Auto-scroll: off";
 }
 
 // Waits briefly for the real tag read to resolve (if one's in flight for the
@@ -136,16 +149,25 @@ export function updateActiveLyricsLine(current) {
   const lineEl = el.lyricsPanel.querySelector(`.lyrics-line[data-index="${idx}"]`);
   if (lineEl) {
     lineEl.classList.add("active");
-    lineEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (lyricsAutoScroll) lineEl.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 }
 
 function toggleLyricsView() {
-  lyricsViewActive = !lyricsViewActive;
-  el.fullPlayerArt.classList.toggle("hidden", lyricsViewActive);
-  el.lyricsPanel.classList.toggle("hidden", !lyricsViewActive);
-  el.lyricsBtn.classList.toggle("icon-active", lyricsViewActive);
-  if (lyricsViewActive) showLyricsForCurrentTrack();
+  // Closing goes through closeLyricsView() so the autoscroll reset (see its
+  // own comment) also applies to tapping the lyrics button itself, not just
+  // closing the whole player.
+  if (lyricsViewActive) {
+    closeLyricsView();
+    return;
+  }
+  lyricsViewActive = true;
+  el.fullPlayerArt.classList.add("hidden");
+  el.lyricsPanel.classList.remove("hidden");
+  el.lyricsBtn.classList.add("icon-active");
+  el.lyricsAutoscrollBtn.classList.remove("hidden");
+  showLyricsForCurrentTrack();
 }
 
 el.lyricsBtn.addEventListener("click", toggleLyricsView);
+el.lyricsAutoscrollBtn.addEventListener("click", () => setLyricsAutoScroll(!lyricsAutoScroll));

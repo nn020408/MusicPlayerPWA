@@ -245,17 +245,13 @@ export async function playCurrent() {
   const isStillCurrent = () => playGeneration === myGeneration;
 
   // Only apply a restored position if we're playing the exact track it was
-  // saved for — tapping next/previous or a different song before ever
-  // resuming should just start that track at 0, not seek to the old spot.
+  // saved for -- next/previous or a different song first should start at 0.
   const resumeAt = hasPendingResume && queueIndex === pendingResumeIndex ? pendingResumePosition : 0;
   hasPendingResume = false;
 
-  // Recorded immediately, before we know whether this attempt actually
-  // succeeds — otherwise a track that fails to load (a network drop mid
-  // auto-advance, most commonly) leaves the on-disk state pointing at
-  // whatever the *previous* track was, since that was the last successful
-  // save. Reopening the app later would then show that stale earlier track
-  // instead of the one actually current when things broke.
+  // Recorded immediately, before we know this attempt succeeds -- otherwise
+  // a track that fails to load (a network drop mid auto-advance) leaves the
+  // on-disk state pointing at whatever the *previous* track was.
   savePlaybackState(resumeAt);
 
   // Kick off the cover-art fetch immediately, in parallel with the download
@@ -309,6 +305,11 @@ export async function playCurrent() {
         // later via setNowPlayingMetadata() exactly as before.
         if (audioEl.setPendingMetadata) audioEl.setPendingMetadata(basicMetadataFor(item));
         audioEl.src = url;
+        // Before play(), not after -- NativeAudioElement.play() reads
+        // currentTime right then to tell native where to start (set later,
+        // every resume used to start at 0 then jump). Re-applied each retry
+        // since src = url resets it to 0 every time.
+        if (resumeAt > 0) audioEl.currentTime = resumeAt;
         // Safe to revoke now — audioEl.src was reassigned above, so nothing
         // still references the previous blob (if any).
         if (currentBlobUrl && currentBlobUrl !== usedBlobUrl) URL.revokeObjectURL(currentBlobUrl);
@@ -355,7 +356,6 @@ export async function playCurrent() {
       }
     );
     if (!isStillCurrent()) return; // you skipped to something else while this was retrying
-    if (resumeAt > 0) audioEl.currentTime = resumeAt;
     player.onStatus && player.onStatus("");
     updateMediaSessionMetadata(item);
     player.onTrackChange && player.onTrackChange(item);
@@ -506,18 +506,18 @@ export function playPrevious() {
 }
 
 // Reconciles JS's bookkeeping after native already loaded+started `itemId` on its own.
-function applyNativeTrackChange({ itemId, position, url }) {
+function applyNativeTrackChange({ itemId, position, url, positionMs }) {
   clearPendingAdvanceFeedback(player.onStatus);
   if (position == null || position < 0 || position >= playOrder.length) return;
-  // Verified before committing -- mirrors NativeQueueManager's own
-  // peekAdvancePosition()/commitPosition() split, same reason.
+  // Verified before committing -- mirrors NativeQueueManager's own split.
   const candidateIndex = playOrder[position];
   const item = queue[candidateIndex];
   if (!item || item.id !== itemId) return;
   orderPos = position;
   queueIndex = candidateIndex;
   loadedTrackId = itemId;
-  savePlaybackState();
+  // positionMs (only from reconcile()) is native's fresh position -- audioEl.currentTime can still be stale right after waking up.
+  savePlaybackState(positionMs != null ? positionMs / 1000 : undefined);
   player.onTrackChange && player.onTrackChange(item);
   if (url) readId3Tags(url).then((tags) => applyRealTags(item, tags)); // real artist/album over the filename guess
 }

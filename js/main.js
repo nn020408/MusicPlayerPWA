@@ -11,6 +11,7 @@ import { DEFAULT_FOLDER_KEY, LIBRARY_CACHE_KEY, libraryArtistFor, libraryTracks 
 import { ensureFavoritesPlaylist } from "./data/playlists.js";
 import { audioEl, player, repeatMode, resetPlayer, restorePlaybackState, shuffleOn } from "./player/player.js";
 import { paintFallbackArt } from "./ui/fallbackArt.js";
+import { showToast } from "./ui/toast.js";
 import { ensureLibraryLoaded, markLibraryStale } from "./ui/libraryWork.js";
 import { openMainFolderView } from "./ui/folderView.js";
 import { openFolderPicker } from "./ui/folderPicker.js";
@@ -20,6 +21,7 @@ import "./ui/playlists.js";
 import "./ui/settings.js";
 import "./ui/pullToRefresh.js";
 import "./ui/errorLogView.js";
+import "./ui/changelogView.js";
 import "./ui/swipe.js";
 
 // Shows whatever was last playing (title/artist/colorful placeholder) without
@@ -48,6 +50,7 @@ function showApp() {
   el.loginScreen.classList.add("hidden");
   el.appScreen.classList.remove("hidden");
   pushBackGuard();
+  showToast(`NubePlayer ${APP_VERSION}`); // confirms the running build at a glance on every open, same info Settings already shows on demand
 
   const restoredItem = restorePlaybackState();
   if (restoredItem) showRestoredTrackDisplay(restoredItem);
