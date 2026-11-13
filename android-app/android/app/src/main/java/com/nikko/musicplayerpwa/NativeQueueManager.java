@@ -98,6 +98,28 @@ class NativeQueueManager {
         persist();
     }
 
+    // Updates just the name/artist of a track already in the queue, by id --
+    // deliberately separate from setQueue(), which also replaces `position`.
+    // Used to persist a real-tag correction (see NativePlayerPlugin's
+    // refreshRealTagsAsync and js/player/nativeQueueSync.js's cacheRealTags)
+    // without that side effect. Confirmed as a real bug once this was split
+    // out: a correction that finishes resolving well after native has
+    // already moved on (e.g. one started right before the WebView froze,
+    // delivered only once it thaws) used to go through setQueue() and roll
+    // `position` back to wherever it was when the correction started --
+    // directly causing the phone/car to show the wrong song's title/artist
+    // while a completely different track was actually playing.
+    synchronized void updateMetadata(String itemId, String name, String artist) {
+        for (int i = 0; i < tracks.size(); i++) {
+            TrackDescriptor t = tracks.get(i);
+            if (t.id.equals(itemId)) {
+                tracks.set(i, new TrackDescriptor(t.id, name, artist));
+                persist();
+                return;
+            }
+        }
+    }
+
     synchronized void setRepeatMode(String mode) {
         repeatMode = mode != null ? mode : "off";
         persist();

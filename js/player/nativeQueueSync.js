@@ -17,7 +17,7 @@
 // playOrder.
 
 import { isNative } from "../core/platform.js";
-import { forgetTrack } from "../data/library.js";
+import { forgetTrack, libraryArtistFor } from "../data/library.js";
 
 function plugin() {
   return isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
@@ -29,19 +29,25 @@ export function syncNativeQueue(queue, playOrder, orderPos, repeatMode) {
   const tracks = playOrder.map((i) => {
     const t = queue[i];
     const audio = t.audio || {};
-    return { id: t.id, name: audio.title || t.name, artist: audio.artist || "Unknown Artist" }; // never "" -- see basicMetadataFor's comment in player.js
+    return { id: t.id, name: audio.title || t.name, artist: audio.artist || libraryArtistFor(t.id) || "Unknown Artist" }; // never "" -- see basicMetadataFor's comment in player.js
   });
   p.setQueue({ tracks, position: orderPos, repeatMode });
 }
 
-// Persists the real ID3 tags onto the queue's own item and re-syncs native --
-// without this, native's cached copy of this track (and so the car/Bluetooth
-// display) reverts to the filename/light-OneDrive guess every time it comes
-// up again (repeat, shuffle revisit, Previous) while the screen's off, since
-// nothing remembered the correction for next time.
-export function cacheRealTags(item, { title, artist, album }, queue, playOrder, orderPos, repeatMode) {
+// Persists the real ID3 tags onto the queue's own item (so a repeat/shuffle
+// revisit remembers the correction instead of reverting to the filename/
+// light-OneDrive guess) and pushes JUST this one track's metadata to native
+// -- deliberately never the whole queue+position the way syncNativeQueue()
+// does. Confirmed as a real bug without that split: a correction that
+// resolves well after native has already moved on (e.g. one started right
+// before the WebView froze, only delivered once it thaws) rolled native's
+// position back to wherever it was when the correction started, showing the
+// wrong song's title/artist on the phone and car while a different track was
+// actually playing. See NativeQueueManager.updateMetadata()'s own comment.
+export function cacheRealTags(item, { title, artist, album }) {
   item.audio = { ...item.audio, title, artist, album };
-  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
+  const p = plugin();
+  if (p) p.updateQueueItemMetadata({ itemId: item.id, name: title || item.name, artist });
 }
 
 export function syncNativeRepeatMode(repeatMode) {

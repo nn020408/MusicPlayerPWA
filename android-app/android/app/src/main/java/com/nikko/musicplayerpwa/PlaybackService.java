@@ -53,9 +53,19 @@ public class PlaybackService extends MediaSessionService {
     // tapped. See the receiver/callback pair registered in onCreate().
     private long lastBecameNoisyAt = 0;
     private static final long NOISY_RESUME_WINDOW_MS = 15000;
+    // Set by NativePlayerPlugin's pause()/stop() (a real user/app pause, not
+    // ExoPlayer's own noisy-triggered one) and cleared by play()/load() --
+    // confirmed as a real bug without this: deliberately pausing, then having
+    // the car's Bluetooth drop and reconnect (even minutes later, unrelated to
+    // the pause) auto-resumed playback the user had intentionally stopped.
+    private volatile boolean userRequestedPause = false;
 
     public static PlaybackService getInstance() {
         return instance;
+    }
+
+    public void setUserRequestedPause(boolean value) {
+        userRequestedPause = value;
     }
 
     @Override
@@ -161,7 +171,7 @@ public class PlaybackService extends MediaSessionService {
                         break;
                     }
                 }
-                if (!reconnected || System.currentTimeMillis() - lastBecameNoisyAt > NOISY_RESUME_WINDOW_MS) return;
+                if (!reconnected || userRequestedPause || System.currentTimeMillis() - lastBecameNoisyAt > NOISY_RESUME_WINDOW_MS) return;
                 if (player != null && !player.isPlaying() && player.getMediaItemCount() > 0) player.play();
             }
         };

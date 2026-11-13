@@ -11,10 +11,7 @@ import { NativeAudioElement } from "./nativeAudioElement.js";
 import { armPendingAdvanceFeedback, cacheRealTags, clearPendingAdvanceFeedback, initNativeQueueSync, syncNativeQueue, syncNativeRepeatMode } from "./nativeQueueSync.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
-// Only present inside the Capacitor-wrapped Android app, once the native
-// playback engine (ExoPlayer, via PlaybackService) is installed — a real
-// native foreground service never freezes the way the WebView's own <audio>
-// element does. Guarded so jsdom tests (NativePlayer undefined) use <audio>.
+// Present only inside the Capacitor Android app (native foreground service, never frozen like the WebView's <audio>); guarded so jsdom tests fall back to <audio>.
 function nativePlayerPlugin() {
   return isNative() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativePlayer;
 }
@@ -483,8 +480,7 @@ function advanceOrderPos(delta) {
   return true;
 }
 
-// On native, a thin pass-through to NativePlayerPlugin.requestNext() — same
-// method hardware/notification presses reach, one implementation, not two.
+// On native, a thin pass-through to NativePlayerPlugin.requestNext() -- same method hardware/notification presses reach.
 export function playNext() {
   const plugin = nativePlayerPlugin();
   if (plugin) {
@@ -509,8 +505,7 @@ export function playPrevious() {
 function applyNativeTrackChange({ itemId, position, url, positionMs }) {
   clearPendingAdvanceFeedback(player.onStatus);
   if (position == null || position < 0 || position >= playOrder.length) return;
-  // Verified before committing -- mirrors NativeQueueManager's own split.
-  const candidateIndex = playOrder[position];
+  const candidateIndex = playOrder[position]; // verified before committing, mirrors NativeQueueManager's own split
   const item = queue[candidateIndex];
   if (!item || item.id !== itemId) return;
   orderPos = position;
@@ -536,7 +531,7 @@ function applyRealTags(item, tags) {
   const title = tags.title || item.name.replace(/\.[^/.]+$/, "");
   const artist = tags.artist || (item.audio && item.audio.artist) || libraryArtistFor(item.id) || "Unknown Artist"; // never "" -- see basicMetadataFor's own comment
   const album = tags.album || (item.audio && item.audio.album) || "";
-  cacheRealTags(item, { title, artist, album }, queue, playOrder, orderPos, repeatMode);
+  cacheRealTags(item, { title, artist, album });
   if (audioEl.setNowPlayingMetadata) audioEl.setNowPlayingMetadata({ title, artist, album });
   if ("mediaSession" in navigator && navigator.mediaSession.metadata) {
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -549,6 +544,11 @@ function applyRealTags(item, tags) {
   if (native) native.setMetadata({ title, artist, album, artwork: [] });
   updateCarMetadata(title, artist, album, isFinite(audioEl.duration) ? audioEl.duration * 1000 : 0);
   player.onRealTags && player.onRealTags({ ...tags, pictureUrl });
+}
+
+// Whether playNext() would move to a different track (unlike getUpcomingTracks(), doesn't special-case repeat-one -- that's only for the Up Next display).
+export function hasNextTrack() {
+  return playOrder.length > 1 && (repeatMode === "all" || orderPos < playOrder.length - 1);
 }
 
 // Pure lookahead over playOrder/queue — both already sit in memory (the

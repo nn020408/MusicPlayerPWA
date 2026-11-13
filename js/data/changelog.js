@@ -5,6 +5,22 @@
 // the user about, skip ones that are purely internal.
 export const CHANGELOG = [
   {
+    version: "v188",
+    items: [
+      "Fixed the title and artist sometimes showing a different song than what was actually playing, on both the phone and the car's Bluetooth display.",
+      "The car's Bluetooth display now matches the phone's artist name instead of sometimes falling back to \"Unknown Artist\".",
+      "Fixed deleting the currently playing song doing nothing when repeat-one was on, instead of moving to the next song.",
+      "A deliberate pause now stays paused through a brief Bluetooth disconnect/reconnect, instead of resuming on its own.",
+      "Improved reliability of reading a song's real title/artist over a weak connection.",
+    ],
+  },
+  {
+    version: "v187",
+    items: [
+      "Fixed the Now Playing artist sometimes staying blank instead of showing \"Unknown Artist\" while the real tag was still loading.",
+    ],
+  },
+  {
     version: "v186",
     items: [
       "The real artist and title now get read directly on the phone, so songs reached while your screen is off show the right info immediately instead of a placeholder.",

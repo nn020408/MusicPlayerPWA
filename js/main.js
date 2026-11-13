@@ -30,7 +30,7 @@ import "./ui/swipe.js";
 function showRestoredTrackDisplay(item) {
   el.nowPlayingBar.classList.remove("hidden");
   const title = item.name.replace(/\.[^/.]+$/, "");
-  const artist = (item.audio && item.audio.artist) || libraryArtistFor(item.id);
+  const artist = (item.audio && item.audio.artist) || libraryArtistFor(item.id) || "Unknown Artist"; // never "" -- see playerUI.js's own onTrackChange for why
   el.nowPlayingTitle.textContent = title;
   el.nowPlayingArtist.textContent = artist;
   el.fullTitle.textContent = title;

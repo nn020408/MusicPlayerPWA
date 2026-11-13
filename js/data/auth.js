@@ -289,6 +289,15 @@ if (isNative()) {
 // first with the same (about-to-be-invalidated) token can get rejected even
 // though the first one actually succeeded, forcing a spurious full sign-out.
 let refreshPromise = null;
+// Whether refreshPromise's own in-flight call was itself forced -- a
+// force:false caller may reuse a force:false (or stronger) refresh already in
+// flight, but a force:true caller may NOT reuse a force:false one. Confirmed
+// as a real bug without this split: that in-flight force:false call can still
+// resolve to the same cached token native considers "fresh by its own clock"
+// even though it just 401'd against Graph, which is exactly what the force:
+// true caller needed a real refresh to get past -- silently losing force
+// semantics and handing back the same already-401'd token.
+let refreshPromiseForce = false;
 
 // force bypasses the "still fresh by our own clock" shortcut -- for a caller
 // who just got a 401 from Graph itself using this exact cached token, which
@@ -298,9 +307,10 @@ async function nativeGetAccessToken(force) {
   if (!tokens) throw new Error("Not signed in");
   if (!force && tokens.expiresAt - 60000 > Date.now()) return tokens.accessToken;
 
-  if (refreshPromise) return refreshPromise;
+  if (refreshPromise && (refreshPromiseForce || !force)) return refreshPromise;
   const myGeneration = authGeneration;
-  refreshPromise = (async () => {
+  refreshPromiseForce = force;
+  const thisPromise = (async () => {
     try {
       // Routed through native's own NativeAuthClient instead of POSTing the
       // refresh grant here directly -- this used to run its own independent
@@ -311,7 +321,9 @@ async function nativeGetAccessToken(force) {
       // request loop" (AADSTS50196) -- confirmed on-device, not theoretical.
       // Native's own single-flight guard (NativeAuthClient.getAccessToken()
       // is `synchronized`) now covers both call sites because there's only
-      // one implementation left to call.
+      // one implementation left to call -- so a force:true call made here
+      // right after a force:false one is still safely serialized there, even
+      // though it isn't shared with that earlier call above.
       const fresh = await window.Capacitor.Plugins.NativePlayer.getAccessToken({ force });
       // Don't resurrect tokens in localStorage if sign-out happened while
       // this was in flight -- see authGeneration's own comment.
@@ -321,9 +333,13 @@ async function nativeGetAccessToken(force) {
       localStorage.removeItem(NATIVE_TOKEN_KEY);
       throw new Error("Sign-in expired — please sign in again");
     } finally {
-      refreshPromise = null;
+      // Only if nothing newer (e.g. a force:true call this one couldn't
+      // share) has already replaced it -- otherwise this would wipe out that
+      // newer in-flight call's own entry.
+      if (refreshPromise === thisPromise) refreshPromise = null;
     }
   })();
+  refreshPromise = thisPromise;
   return refreshPromise;
 }
 

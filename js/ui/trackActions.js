@@ -8,7 +8,7 @@ import { el } from "../core/dom.js";
 import { clearFolderListCache, deleteItem } from "../data/graph.js";
 import { forgetTrack } from "../data/library.js";
 import { removeTrackFromAllPlaylists, removeTrackFromPlaylist } from "../data/playlists.js";
-import { currentTrack, getUpcomingTracks, playNext, resetPlayer } from "../player/player.js";
+import { currentTrack, hasNextTrack, playNext, resetPlayer } from "../player/player.js";
 import { openAddToPlaylistModal } from "./addToPlaylist.js";
 import { showToast } from "./toast.js";
 
@@ -144,7 +144,13 @@ export async function deleteTrackWithConfirm(track, { onDeleted } = {}) {
   // sitting there to "delete" again (which Graph silently no-ops on a
   // repeat 404, so nothing about it looked wrong until you knew to check).
   if (currentTrack() && currentTrack().id === track.id) {
-    if (getUpcomingTracks(1).length > 0) {
+    // hasNextTrack(), not getUpcomingTracks(1).length -- that one deliberately
+    // always reports "nothing next" under repeat-one (it's only for the Up
+    // Next display), which wrongly took the "stop everything" branch below
+    // and wiped a perfectly good multi-song queue just because repeat-one
+    // happened to be on, instead of correctly skipping to the next song the
+    // same way an explicit Next press always has under repeat-one.
+    if (hasNextTrack()) {
       playNext();
     } else {
       resetPlayer();

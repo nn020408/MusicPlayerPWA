@@ -429,6 +429,15 @@ public class NativePlayerPlugin extends Plugin {
             String title = tags.title != null && !tags.title.isEmpty() ? tags.title : null;
             String artist = tags.artist != null && !tags.artist.isEmpty() ? tags.artist : null;
             if (title == null && artist == null) return;
+            String finalTitle = title != null ? title : track.name;
+            String finalArtist = artist != null ? artist : track.artist;
+            // Persisted into the queue (not just ExoPlayer's own in-memory
+            // metadata below) via updateMetadata() -- never setQueue(), which
+            // also replaces `position` (see its own comment) -- so the
+            // correction survives a repeat/shuffle revisit even if the
+            // WebView stays frozen for this track's entire time playing and
+            // never gets a chance to run its own equivalent correction.
+            NativeQueueManager.getInstance(getContext()).updateMetadata(track.id, finalTitle, finalArtist);
             main.post(() -> {
                 ExoPlayer player = currentPlayer();
                 if (player == null) return;
@@ -438,8 +447,8 @@ public class NativePlayerPlugin extends Plugin {
                 // is actually playing now.
                 if (current == null || current.localConfiguration == null || !url.equals(current.localConfiguration.uri.toString())) return;
                 MediaMetadata updated = new MediaMetadata.Builder()
-                        .setTitle(title != null ? title : track.name)
-                        .setArtist(artist != null ? artist : track.artist)
+                        .setTitle(finalTitle)
+                        .setArtist(finalArtist)
                         .setAlbumTitle(tags.album)
                         .build();
                 // Same URI as `current` -- Media3 updates the session/
@@ -481,6 +490,12 @@ public class NativePlayerPlugin extends Plugin {
         String album = call.getString("album", "");
         long resumePositionMs = Math.round(call.getDouble("resumePositionMs", 0.0));
 
+        // A new load is always something the user/app wants playing now --
+        // clears any earlier deliberate pause so a later Bluetooth reconnect
+        // isn't still held back by it (see PlaybackService.userRequestedPause).
+        PlaybackService existing = PlaybackService.getInstance();
+        if (existing != null) existing.setUserRequestedPause(false);
+
         Intent intent = new Intent(getContext(), PlaybackService.class);
         ContextCompat.startForegroundService(getContext(), intent);
 
@@ -518,6 +533,8 @@ public class NativePlayerPlugin extends Plugin {
 
     @PluginMethod
     public void play(PluginCall call) {
+        PlaybackService service = PlaybackService.getInstance();
+        if (service != null) service.setUserRequestedPause(false);
         main.post(() -> {
             ExoPlayer player = currentPlayer();
             if (player == null) {
@@ -536,6 +553,11 @@ public class NativePlayerPlugin extends Plugin {
 
     @PluginMethod
     public void pause(PluginCall call) {
+        // A real user/app pause -- see PlaybackService.userRequestedPause's
+        // own comment for why this has to be tracked separately from
+        // ExoPlayer's own noisy-triggered pause.
+        PlaybackService service = PlaybackService.getInstance();
+        if (service != null) service.setUserRequestedPause(true);
         main.post(() -> {
             ExoPlayer player = currentPlayer();
             if (player != null) player.pause();
@@ -554,6 +576,8 @@ public class NativePlayerPlugin extends Plugin {
     // session indefinitely.
     @PluginMethod
     public void stop(PluginCall call) {
+        PlaybackService stoppedService = PlaybackService.getInstance();
+        if (stoppedService != null) stoppedService.setUserRequestedPause(true);
         main.post(() -> {
             ExoPlayer player = currentPlayer();
             if (player != null) {
@@ -615,6 +639,22 @@ public class NativePlayerPlugin extends Plugin {
             }
         }
         NativeQueueManager.getInstance(getContext()).setQueue(tracks, position, repeatMode);
+        call.resolve();
+    }
+
+    // The ONLY path a real-tag correction should use to reach native's queue
+    // -- see NativeQueueManager.updateMetadata()'s own comment for why
+    // setQueue() (which also replaces `position`) isn't safe for this.
+    @PluginMethod
+    public void updateQueueItemMetadata(PluginCall call) {
+        String itemId = call.getString("itemId");
+        String name = call.getString("name", "");
+        String artist = call.getString("artist", "");
+        if (itemId == null) {
+            call.reject("itemId is required");
+            return;
+        }
+        NativeQueueManager.getInstance(getContext()).updateMetadata(itemId, name, artist);
         call.resolve();
     }
 

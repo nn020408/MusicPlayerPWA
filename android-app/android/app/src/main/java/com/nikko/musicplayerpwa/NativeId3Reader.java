@@ -6,6 +6,9 @@ import android.util.Log;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 // Reads the real embedded title/artist/album straight from the audio file's
 // own tags (ID3/MP4/FLAC -- whatever Android's own media framework already
@@ -23,10 +26,19 @@ import java.util.concurrent.Executors;
 // this is even called.
 class NativeId3Reader {
     private static final String TAG = "NativeId3Reader";
-    // Two threads, not one -- a single stuck MediaMetadataRetriever call (no
-    // network-level timeout of its own) would otherwise wedge every later
-    // read behind it indefinitely instead of just degrading gracefully.
-    private static final ExecutorService executor = Executors.newFixedThreadPool(2);
+    // How long readTagsAsync() waits for a single read before giving up on it
+    // -- see its own comment for why this can't actually stop the underlying
+    // MediaMetadataRetriever call.
+    private static final long READ_TIMEOUT_MS = 8000;
+    // Cached, not fixed -- confirmed as a real bug with a fixed 2-thread pool:
+    // MediaMetadataRetriever.setDataSource() has no network-level timeout of
+    // its own, so on a flaky connection two slow/hung reads could permanently
+    // occupy both pool threads, silently and permanently wedging every LATER
+    // read behind them for the rest of the app process's life (the car/phone
+    // would just keep showing the lightweight guess forever, with no error
+    // anywhere). A cached pool means a later read always gets its own fresh
+    // thread no matter how many earlier ones are still stuck.
+    private static final ExecutorService executor = Executors.newCachedThreadPool();
 
     static class Tags {
         final String title;
@@ -46,9 +58,25 @@ class NativeId3Reader {
 
     // Fires `callback` on this reader's own background thread, never the
     // caller's -- callers that touch ExoPlayer must hop back to main
-    // themselves (same convention as the rest of this native layer).
+    // themselves (same convention as the rest of this native layer). Always
+    // fires within READ_TIMEOUT_MS, even if the underlying read never
+    // actually returns -- that read keeps running on its own thread
+    // regardless (there's no safe way to force-stop it), but this caller
+    // stops waiting on it and gets a null (best-effort, same as any other
+    // failure) instead of hanging indefinitely.
     static void readTagsAsync(String url, Callback callback) {
-        executor.execute(() -> callback.onTags(readTagsBlocking(url)));
+        executor.execute(() -> {
+            Future<Tags> future = executor.submit(() -> readTagsBlocking(url));
+            Tags tags;
+            try {
+                tags = future.get(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                tags = null;
+            } catch (Exception e) {
+                tags = null;
+            }
+            callback.onTags(tags);
+        });
     }
 
     private static Tags readTagsBlocking(String url) {

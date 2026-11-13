@@ -65,7 +65,7 @@ player.onTrackChange = (item) => {
   pulseArtSwap(el.npArt);
   pulseArtSwap(el.fullPlayerArt);
   const title = item.name.replace(/\.[^/.]+$/, "");
-  const artist = (item.audio && item.audio.artist) || libraryArtistFor(item.id);
+  const artist = (item.audio && item.audio.artist) || libraryArtistFor(item.id) || "Unknown Artist"; // never "" -- matches basicMetadataFor()/applyRealTags() in player.js, which already needed this same fallback
   el.nowPlayingTitle.textContent = title;
   el.nowPlayingArtist.textContent = artist;
   el.fullTitle.textContent = title;
