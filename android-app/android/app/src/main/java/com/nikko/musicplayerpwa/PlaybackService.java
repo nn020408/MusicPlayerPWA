@@ -4,13 +4,20 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Build;
 
 import android.support.v4.media.session.PlaybackStateCompat;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.media.session.MediaButtonReceiver;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
@@ -36,6 +43,16 @@ public class PlaybackService extends MediaSessionService {
     private ExoPlayer player;
     private MediaSession mediaSession;
     private NotificationManager notificationManager;
+    private BroadcastReceiver noisyReceiver;
+    private AudioDeviceCallback audioDeviceCallback;
+    // Reported: on a flaky Bluetooth link, a brief disconnect-reconnect
+    // blip (not a real "I left the car") leaves playback paused forever --
+    // ExoPlayer's own setHandleAudioBecomingNoisy(true) below correctly
+    // pauses on the disconnect, but nothing resumes it when the SAME output
+    // reconnects moments later, so it just sits paused until manually
+    // tapped. See the receiver/callback pair registered in onCreate().
+    private long lastBecameNoisyAt = 0;
+    private static final long NOISY_RESUME_WINDOW_MS = 15000;
 
     public static PlaybackService getInstance() {
         return instance;
@@ -120,6 +137,35 @@ public class PlaybackService extends MediaSessionService {
                 updateNotification();
             }
         });
+
+        noisyReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                lastBecameNoisyAt = System.currentTimeMillis();
+            }
+        };
+        ContextCompat.registerReceiver(this, noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Only resumes a brief disconnect-reconnect blip (see
+        // NOISY_RESUME_WINDOW_MS's own comment above) -- a genuine, lasting
+        // disconnect (you actually left the car) leaves far more than this
+        // gap before anything ever reconnects, so this never fires for that.
+        audioDeviceCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                boolean reconnected = false;
+                for (AudioDeviceInfo info : addedDevices) {
+                    int type = info.getType();
+                    if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                        reconnected = true;
+                        break;
+                    }
+                }
+                if (!reconnected || System.currentTimeMillis() - lastBecameNoisyAt > NOISY_RESUME_WINDOW_MS) return;
+                if (player != null && !player.isPlaying() && player.getMediaItemCount() > 0) player.play();
+            }
+        };
+        ((AudioManager) getSystemService(AUDIO_SERVICE)).registerAudioDeviceCallback(audioDeviceCallback, null);
     }
 
     // Built by hand, not left to Media3's own automatic notification manager
@@ -210,6 +256,14 @@ public class PlaybackService extends MediaSessionService {
         if (player != null) {
             player.release();
             player = null;
+        }
+        if (noisyReceiver != null) {
+            unregisterReceiver(noisyReceiver);
+            noisyReceiver = null;
+        }
+        if (audioDeviceCallback != null) {
+            ((AudioManager) getSystemService(AUDIO_SERVICE)).unregisterAudioDeviceCallback(audioDeviceCallback);
+            audioDeviceCallback = null;
         }
         instance = null;
         super.onDestroy();

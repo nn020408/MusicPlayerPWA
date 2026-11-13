@@ -1,5 +1,6 @@
 {
   "appId": "com.nikko.musicplayerpwa",
   "appName": "NubePlayer",
-  "webDir": "www"
+  "webDir": "www",
+  "backgroundColor": "#121212"
 }

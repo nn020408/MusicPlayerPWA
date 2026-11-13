@@ -414,6 +414,39 @@ public class NativePlayerPlugin extends Plugin {
         data.put("artist", track.artist);
         data.put("url", url);
         notifyListeners("trackChanged", data);
+        refreshRealTagsAsync(track, url);
+    }
+
+    // Best-effort real-tag correction for native auto-advance/Next/Previous --
+    // never delays the play() call above, which has already started by the
+    // time this even begins. Closes the one case player.js's own
+    // readId3Tags()-based correction can't reach: a track native loaded
+    // entirely on its own while the WebView was frozen the whole time (see
+    // NativeId3Reader's own comment).
+    private void refreshRealTagsAsync(NativeQueueManager.TrackDescriptor track, String url) {
+        NativeId3Reader.readTagsAsync(url, (tags) -> {
+            if (tags == null) return;
+            String title = tags.title != null && !tags.title.isEmpty() ? tags.title : null;
+            String artist = tags.artist != null && !tags.artist.isEmpty() ? tags.artist : null;
+            if (title == null && artist == null) return;
+            main.post(() -> {
+                ExoPlayer player = currentPlayer();
+                if (player == null) return;
+                MediaItem current = player.getCurrentMediaItem();
+                // Only this exact track/URL is still what's loaded -- a fast
+                // skip away while this was in flight must not stomp whatever
+                // is actually playing now.
+                if (current == null || current.localConfiguration == null || !url.equals(current.localConfiguration.uri.toString())) return;
+                MediaMetadata updated = new MediaMetadata.Builder()
+                        .setTitle(title != null ? title : track.name)
+                        .setArtist(artist != null ? artist : track.artist)
+                        .setAlbumTitle(tags.album)
+                        .build();
+                // Same URI as `current` -- Media3 updates the session/
+                // notification metadata without interrupting playback.
+                player.replaceMediaItem(player.getCurrentMediaItemIndex(), current.buildUpon().setMediaMetadata(updated).build());
+            });
+        });
     }
 
     // Native rotated the refresh token on its own (a Graph call while the

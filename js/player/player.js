@@ -8,7 +8,7 @@ import { readId3Tags } from "../data/id3.js";
 import { forgetTrack, libraryArtistFor, libraryTracks, slimTrack } from "../data/library.js";
 import { updateCarMetadata, updateCarPlaybackState } from "./carMediaSession.js";
 import { NativeAudioElement } from "./nativeAudioElement.js";
-import { armPendingAdvanceFeedback, clearPendingAdvanceFeedback, initNativeQueueSync, syncNativeQueue, syncNativeRepeatMode } from "./nativeQueueSync.js";
+import { armPendingAdvanceFeedback, cacheRealTags, clearPendingAdvanceFeedback, initNativeQueueSync, syncNativeQueue, syncNativeRepeatMode } from "./nativeQueueSync.js";
 import { clearAllPrefetches, prefetchDownloadUrl, prefetchNextTrackBlob, takePrefetchedBlobUrl, takePrefetchedUrl } from "./prefetch.js";
 
 // Only present inside the Capacitor-wrapped Android app, once the native
@@ -522,8 +522,7 @@ function applyNativeTrackChange({ itemId, position, url, positionMs }) {
   if (url) readId3Tags(url).then((tags) => applyRealTags(item, tags)); // real artist/album over the filename guess
 }
 
-// Pushes real embedded-ID3 title/artist/album over the filename guess --
-// shared by playCurrent() and applyNativeTrackChange().
+// Pushes real embedded-ID3 title/artist/album over the filename guess -- shared by playCurrent() and applyNativeTrackChange().
 function applyRealTags(item, tags) {
   if (!tags || currentTrack() !== item) return;
   let pictureUrl = null;
@@ -535,8 +534,9 @@ function applyRealTags(item, tags) {
   }
   if (!tags.artist && !tags.album && !tags.title && !pictureUrl) return;
   const title = tags.title || item.name.replace(/\.[^/.]+$/, "");
-  const artist = tags.artist || (item.audio && item.audio.artist) || libraryArtistFor(item.id);
+  const artist = tags.artist || (item.audio && item.audio.artist) || libraryArtistFor(item.id) || "Unknown Artist"; // never "" -- see basicMetadataFor's own comment
   const album = tags.album || (item.audio && item.audio.album) || "";
+  cacheRealTags(item, { title, artist, album }, queue, playOrder, orderPos, repeatMode);
   if (audioEl.setNowPlayingMetadata) audioEl.setNowPlayingMetadata({ title, artist, album });
   if ("mediaSession" in navigator && navigator.mediaSession.metadata) {
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -854,7 +854,7 @@ window.addEventListener("pagehide", () => savePlaybackState());
 function basicMetadataFor(item) {
   return {
     title: item.name.replace(/\.[^/.]+$/, ""),
-    artist: (item.audio && item.audio.artist) || libraryArtistFor(item.id),
+    artist: (item.audio && item.audio.artist) || libraryArtistFor(item.id) || "Unknown Artist", // never "" -- most AVRCP receivers freeze on the last real artist instead of clearing a blank one
     album: (item.audio && item.audio.album) || "",
   };
 }

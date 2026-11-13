@@ -28,9 +28,20 @@ export function syncNativeQueue(queue, playOrder, orderPos, repeatMode) {
   if (!p) return;
   const tracks = playOrder.map((i) => {
     const t = queue[i];
-    return { id: t.id, name: t.name, artist: (t.audio && t.audio.artist) || "" };
+    const audio = t.audio || {};
+    return { id: t.id, name: audio.title || t.name, artist: audio.artist || "Unknown Artist" }; // never "" -- see basicMetadataFor's comment in player.js
   });
   p.setQueue({ tracks, position: orderPos, repeatMode });
+}
+
+// Persists the real ID3 tags onto the queue's own item and re-syncs native --
+// without this, native's cached copy of this track (and so the car/Bluetooth
+// display) reverts to the filename/light-OneDrive guess every time it comes
+// up again (repeat, shuffle revisit, Previous) while the screen's off, since
+// nothing remembered the correction for next time.
+export function cacheRealTags(item, { title, artist, album }, queue, playOrder, orderPos, repeatMode) {
+  item.audio = { ...item.audio, title, artist, album };
+  syncNativeQueue(queue, playOrder, orderPos, repeatMode);
 }
 
 export function syncNativeRepeatMode(repeatMode) {

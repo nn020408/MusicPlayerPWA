@@ -354,7 +354,17 @@
     <!-- Kept OUTSIDE #lyrics-panel, not inside it -- renderLyricsPanel()
          replaces that whole element's innerHTML every time lyrics (re)load,
          which would wipe out a button living inside it. -->
-    <button id="lyrics-autoscroll-btn" class="icon-btn lyrics-autoscroll-btn icon-active hidden" title="Auto-scroll: on">📍</button>
+    <!-- SVG, not an emoji glyph -- the emoji this replaced ignored icon-active's
+         color change entirely (colored emoji glyphs don't respect CSS `color`),
+         so toggling it had no visible effect even though the underlying state
+         was changing correctly. stroke="currentColor" is what makes icon-active
+         actually show, same as every other icon-btn in this file. -->
+    <button id="lyrics-autoscroll-btn" class="icon-btn lyrics-autoscroll-btn icon-active hidden" title="Auto-scroll: on">
+      <svg class="icon-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1 1 18 0Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+        <circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="2" />
+      </svg>
+    </button>
     <div class="full-player-meta">
       <h2 id="full-title">—</h2>
       <p id="full-artist">—</p>

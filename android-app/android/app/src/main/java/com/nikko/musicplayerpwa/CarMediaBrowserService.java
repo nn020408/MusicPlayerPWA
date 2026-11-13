@@ -63,8 +63,16 @@ public class CarMediaBrowserService extends MediaBrowserServiceCompat {
             @Override
             public void onSkipToPrevious() { sendMediaButton(PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS); }
         });
+        // Same actions as updatePlaybackState() below, not just PLAY/PLAY_PAUSE
+        // -- Android Auto decides its transport-button layout from the FIRST
+        // state it sees on connect (before any track has played, i.e. before
+        // JS's first updatePlaybackState() call lands) and keeps that layout
+        // for the session, falling back to generic 10s rewind/fast-forward
+        // buttons when SKIP_TO_NEXT/PREVIOUS isn't in that first state.
         session.setPlaybackState(new PlaybackStateCompat.Builder()
-                .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PLAY_PAUSE)
+                .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE
+                        | PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+                        | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
                 .setState(PlaybackStateCompat.STATE_PAUSED, 0, 1.0f)
                 .build());
         session.setSessionActivity(PendingIntent.getActivity(

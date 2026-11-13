@@ -130,8 +130,11 @@ function makeTrack(t, folderId, prior) {
 }
 
 // Lightweight copy of an existing track, used for saved playback state.
+// Keeps title/album too (not just artist) -- player.js's cacheRealTags()
+// stores the real ID3 tags there, and dropping them here would lose that
+// correction every time the app fully restarts.
 export function slimTrack(t) {
-  const copy = { id: t.id, name: t.name, audio: t.audio ? { artist: t.audio.artist } : null, _searchText: t._searchText };
+  const copy = { id: t.id, name: t.name, audio: t.audio ? { title: t.audio.title, artist: t.audio.artist, album: t.audio.album } : null, _searchText: t._searchText };
   if (t.folderId) copy.folderId = t.folderId;
   if (t.indexed) copy.indexed = true;
   return copy;

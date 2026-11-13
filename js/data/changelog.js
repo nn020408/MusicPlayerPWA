@@ -5,6 +5,33 @@
 // the user about, skip ones that are purely internal.
 export const CHANGELOG = [
   {
+    version: "v186",
+    items: [
+      "The real artist and title now get read directly on the phone, so songs reached while your screen is off show the right info immediately instead of a placeholder.",
+    ],
+  },
+  {
+    version: "v185",
+    items: [
+      "Fixed the car's Bluetooth display sometimes freezing on an old artist name while the song title kept changing correctly.",
+      "Reduced the white flash some phones showed when reopening the app from the background.",
+    ],
+  },
+  {
+    version: "v184",
+    items: [
+      "Song title/artist corrections now stick for the rest of a song's time in the queue, instead of reverting to a guess every time it comes up again with the screen off.",
+      "Playback now tries to resume on its own after a brief Bluetooth drop, instead of staying paused until you unlock your phone.",
+    ],
+  },
+  {
+    version: "v183",
+    items: [
+      "Fixed the lyrics auto-scroll button not visibly changing color when toggled.",
+      "Android Auto now shows Next/Previous buttons instead of 10-second skip buttons.",
+    ],
+  },
+  {
     version: "v182",
     items: [
       "The app now shows its version briefly when it opens, so you can tell at a glance which build you're on.",
